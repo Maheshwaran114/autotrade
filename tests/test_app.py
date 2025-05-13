@@ -1,6 +1,7 @@
 import pytest
 from src.app import app
 
+# Test fixture for Flask application
 @pytest.fixture
 def client():
     app.config['TESTING'] = True
