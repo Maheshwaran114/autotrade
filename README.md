@@ -12,3 +12,4 @@ An automated trading system for Bank Nifty options with integrated analytics and
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
 - [License](#license)
+# Last updated: Tue May 13 20:18:34 IST 2025
