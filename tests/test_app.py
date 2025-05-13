@@ -3,6 +3,7 @@ from src.app import app
 
 # Test fixture for Flask application
 # This sets up a test client for our Flask app
+# Force VS Code to recognize this file was updated
 @pytest.fixture
 def client():
     app.config['TESTING'] = True
