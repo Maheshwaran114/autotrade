@@ -64,20 +64,27 @@ jobs:
         run: |
           # Check if there's already a droplet with our target name
           echo "Checking for existing droplet with name 'bn-trading-server'..."
-          EXISTING_DROPLET=$(curl -s -X GET \
+          EXISTING_DROPLETS=$(curl -s -X GET \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
             "https://api.digitalocean.com/v2/droplets?per_page=200" | \
             jq -r '.droplets[] | select(.name=="bn-trading-server")')
           
-          if [ -n "$EXISTING_DROPLET" ]; then
-            DROPLET_ID=$(echo "$EXISTING_DROPLET" | jq -r '.id')
-            DROPLET_IP=$(echo "$EXISTING_DROPLET" | jq -r '.networks.v4[] | select(.type=="public") | .ip_address')
+          if [ -n "$EXISTING_DROPLETS" ]; then
+            # Get the first droplet if multiple exist
+            echo "Found existing droplets with name 'bn-trading-server'. Using the first one."
+            FIRST_DROPLET=$(echo "$EXISTING_DROPLETS" | head -n 1)
+            DROPLET_ID=$(echo "$FIRST_DROPLET" | jq -r '.id')
+            DROPLET_IP=$(echo "$FIRST_DROPLET" | jq -r '.networks.v4[] | select(.type=="public") | .ip_address' | head -n 1)
             
-            echo "Found existing droplet: ID=$DROPLET_ID, IP=$DROPLET_IP"
+            echo "Selected droplet: ID=$DROPLET_ID, IP=$DROPLET_IP"
             echo "DROPLET_EXISTS=true" >> $GITHUB_OUTPUT
             echo "DROPLET_IP=$DROPLET_IP" >> $GITHUB_OUTPUT
             echo "DROPLET_ID=$DROPLET_ID" >> $GITHUB_OUTPUT
+            
+            # List all found droplets for information
+            echo "All matching droplets:"
+            echo "$EXISTING_DROPLETS" | jq -r '.id'
           else
             echo "No existing droplet found with name 'bn-trading-server'"
             echo "DROPLET_EXISTS=false" >> $GITHUB_OUTPUT
