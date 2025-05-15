@@ -129,3 +129,28 @@ variable "digitalocean_token" {
   sensitive   = true
 }
 ```
+
+---
+
+## [2025-05-16] CI Pipeline
+
+**Commit:** ci: add GitHub Actions CI workflow  
+**Files:**  
+- `.github/workflows/ci.yml`  
+
+**Snippets:**  
+```yaml
+# .github/workflows/ci.yml
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+```
