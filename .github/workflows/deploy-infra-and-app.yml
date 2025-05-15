@@ -66,34 +66,37 @@ jobs:
         working-directory: infra
         id: tf_output
         run: |
-          # Capture all terraform outputs
+          # Capture all terraform outputs in a structured format
           echo "Getting Terraform outputs..."
-          terraform output > terraform_outputs.txt
-          cat terraform_outputs.txt
           
-          # Try multiple methods to get the floating IP
-          FLOATING_IP=""
+          # Method 1: Get the floating IP directly using terraform output command
+          echo "Method 1: Getting floating IP directly..."
+          FLOATING_IP=$(terraform output -raw floating_ip 2>/dev/null || echo "")
           
-          # Method 1: Extract with grep
-          echo "Method 1: Extracting with grep..."
-          FLOATING_IP=$(grep "floating_ip" terraform_outputs.txt | cut -d "=" -f2 | tr -d ' "' || echo "")
-          
-          # Method 2: Direct terraform output command if Method 1 fails
+          # Method 2: If Method 1 fails, get droplet IP instead
           if [ -z "$FLOATING_IP" ]; then
-            echo "Method 2: Using terraform output command directly..."
-            FLOATING_IP=$(terraform output -raw floating_ip 2>/dev/null || echo "")
-          fi
-          
-          # Method 3: If still empty, try to get droplet IP instead
-          if [ -z "$FLOATING_IP" ]; then
-            echo "Method 3: Falling back to droplet IP..."
+            echo "Method 2: Falling back to droplet IP..."
             FLOATING_IP=$(terraform output -raw droplet_ip 2>/dev/null || echo "")
           fi
           
-          # Set output and provide feedback
+          # Method 3: If all direct methods fail, try to debug by showing all terraform outputs
+          if [ -z "$FLOATING_IP" ]; then
+            echo "Method 3: Trying to debug terraform outputs..."
+            terraform output
+            
+            # Last attempt using grep on the flat output
+            terraform output > terraform_outputs.txt
+            FLOATING_IP=$(grep -oE "floating_ip = \"[0-9\.]+" terraform_outputs.txt | grep -oE "[0-9\.]+" || echo "")
+            
+            if [ -z "$FLOATING_IP" ]; then
+              FLOATING_IP=$(grep -oE "droplet_ip = \"[0-9\.]+" terraform_outputs.txt | grep -oE "[0-9\.]+" || echo "")
+            fi
+          fi
+          
+          # Set output and provide feedback using the proper GITHUB_OUTPUT method
           if [ -n "$FLOATING_IP" ]; then
-            echo "DROPLET_IP=${FLOATING_IP}" >> $GITHUB_OUTPUT
-            echo "Successfully captured IP: ${FLOATING_IP}"
+            echo "DROPLET_IP=$FLOATING_IP" >> "$GITHUB_OUTPUT"
+            echo "Successfully captured IP: $FLOATING_IP"
           else
             echo "ERROR: Could not extract any IP address from Terraform outputs"
             echo "Showing all terraform state..."
