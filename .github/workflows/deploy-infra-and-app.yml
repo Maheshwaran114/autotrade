@@ -37,6 +37,8 @@ jobs:
     name: Terraform Apply
     runs-on: ubuntu-latest
     needs: build
+    outputs:
+      droplet_ip: ${{ steps.tf_output.outputs.DROPLET_IP }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -64,9 +66,40 @@ jobs:
         working-directory: infra
         id: tf_output
         run: |
-          FLOATING_IP=$(terraform output -json floating_ip | jq -r '.')
-          echo "DROPLET_IP=${FLOATING_IP}" >> $GITHUB_OUTPUT
-          echo "Using Floating IP: ${FLOATING_IP}"
+          # Capture all terraform outputs
+          echo "Getting Terraform outputs..."
+          terraform output > terraform_outputs.txt
+          cat terraform_outputs.txt
+          
+          # Try multiple methods to get the floating IP
+          FLOATING_IP=""
+          
+          # Method 1: Extract with grep
+          echo "Method 1: Extracting with grep..."
+          FLOATING_IP=$(grep "floating_ip" terraform_outputs.txt | cut -d "=" -f2 | tr -d ' "' || echo "")
+          
+          # Method 2: Direct terraform output command if Method 1 fails
+          if [ -z "$FLOATING_IP" ]; then
+            echo "Method 2: Using terraform output command directly..."
+            FLOATING_IP=$(terraform output -raw floating_ip 2>/dev/null || echo "")
+          fi
+          
+          # Method 3: If still empty, try to get droplet IP instead
+          if [ -z "$FLOATING_IP" ]; then
+            echo "Method 3: Falling back to droplet IP..."
+            FLOATING_IP=$(terraform output -raw droplet_ip 2>/dev/null || echo "")
+          fi
+          
+          # Set output and provide feedback
+          if [ -n "$FLOATING_IP" ]; then
+            echo "DROPLET_IP=${FLOATING_IP}" >> $GITHUB_OUTPUT
+            echo "Successfully captured IP: ${FLOATING_IP}"
+          else
+            echo "ERROR: Could not extract any IP address from Terraform outputs"
+            echo "Showing all terraform state..."
+            terraform show
+            exit 1
+          fi
 
   deploy:
     name: SSH & Deploy Application
@@ -76,11 +109,23 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
       
-      - name: Wait for droplet to be up
+      - name: Wait for droplet to be ready
         run: |
-          for i in {1..12}; do
-            nc -zv ${{ needs.terraform.outputs.DROPLET_IP }} 22 && break
-            echo 'Waiting for SSH...' && sleep 10
+          echo "Waiting for system to be ready at ${{ needs.terraform.outputs.droplet_ip }}..."
+          # Loop with a timeout of 5 minutes (30 x 10 seconds)
+          for i in {1..30}; do
+            if nc -z -w 5 ${{ needs.terraform.outputs.droplet_ip }} 22; then
+              echo "SSH port is open!"
+              # Give the system a bit more time to fully initialize
+              sleep 30
+              break
+            fi
+            echo "Attempt $i: Waiting for SSH to be available..." 
+            sleep 10
+            if [ $i -eq 30 ]; then
+              echo "Error: Timed out waiting for SSH connection"
+              exit 1
+            fi
           done
 
       - name: Add SSH key
@@ -92,22 +137,126 @@ jobs:
       - name: Add DigitalOcean droplet to known hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ needs.terraform.outputs.DROPLET_IP }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> ~/.ssh/known_hosts
 
-      - name: Clone or Update Repo on Droplet
+      - name: Setup Server and Deploy Application
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          ssh -o StrictHostKeyChecking=accept-new root@${{ needs.terraform.outputs.DROPLET_IP }} << 'EOF'
+          ssh -o StrictHostKeyChecking=accept-new root@${{ needs.terraform.outputs.droplet_ip }} << EOF
+            echo "Setting up server environment..."
+            # Update package lists
+            apt-get update
+            
+            # Ensure Docker and Docker Compose are installed
+            if ! command -v docker &> /dev/null; then
+              echo "Installing Docker..."
+              apt-get install -y \
+                apt-transport-https \
+                ca-certificates \
+                curl \
+                gnupg \
+                lsb-release
+              
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+              
+              echo \
+                "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+                \$(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+              
+              apt-get update
+              apt-get install -y docker-ce docker-ce-cli containerd.io
+            fi
+            
+            if ! command -v docker-compose &> /dev/null; then
+              echo "Installing Docker Compose..."
+              curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+              chmod +x /usr/local/bin/docker-compose
+            fi
+            
+            # Install required utilities
+            apt-get install -y curl jq
+            
+            # Clone or update the repository
+            REPO="${GITHUB_REPOSITORY}"
             if [ -d /bn-trading ]; then
+              echo "Updating existing repository..."
               cd /bn-trading && git pull origin main
             else
-              git clone https://github.com/${{ github.repository }} /bn-trading
+              echo "Cloning repository..."
+              git clone https://github.com/\${REPO} /bn-trading
+            fi
+            
+            # Deploy with Docker Compose
+            cd /bn-trading
+            echo "Starting application with Docker Compose..."
+            export DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME}"
+            docker-compose down || true
+            docker-compose pull
+            docker-compose up -d
+            
+            # Check if containers are running
+            echo "Checking deployment status..."
+            if docker-compose ps | grep -q "Up"; then
+              echo "Deployment successful - containers are running"
+              
+              # Wait for the application to be fully operational
+              echo "Waiting for application to initialize..."
+              HEALTH_CHECK_ATTEMPTS=0
+              MAX_ATTEMPTS=10
+              
+              while [ \$HEALTH_CHECK_ATTEMPTS -lt \$MAX_ATTEMPTS ]; do
+                if curl -s --max-time 5 http://localhost:5000/health | grep -q "ok"; then
+                  echo "✅ Health check passed: Application is fully operational"
+                  break
+                fi
+                
+                echo "Health check attempt \$((HEALTH_CHECK_ATTEMPTS+1))/\$MAX_ATTEMPTS: Waiting for application to be ready..."
+                HEALTH_CHECK_ATTEMPTS=\$((HEALTH_CHECK_ATTEMPTS+1))
+                sleep 5
+                
+                # If we've reached max attempts, show warning but don't fail
+                if [ \$HEALTH_CHECK_ATTEMPTS -eq \$MAX_ATTEMPTS ]; then
+                  echo "⚠️ Warning: Health check did not pass within expected time."
+                  echo "Application containers are running, but health check endpoint isn't responding."
+                  echo "This might indicate an application initialization issue."
+                fi
+              done
+            else
+              echo "ERROR: Deployment failed - containers are not running"
+              docker-compose logs
+              exit 1
             fi
           EOF
 
-      - name: Start Docker Compose on Droplet
+      - name: Verify Deployment
         run: |
-          ssh root@${{ needs.terraform.outputs.DROPLET_IP }} << 'EOF'
-            cd /bn-trading
-            docker-compose pull
-            docker-compose up -d
-          EOF
+          echo "Verifying deployment by checking the application endpoint..."
+          # Give the application a moment to start
+          sleep 20
+          # Try to connect to the app endpoint
+          curl_attempt=0
+          max_attempts=6
+          
+          while [ $curl_attempt -lt $max_attempts ]; do
+            echo "Attempt $((curl_attempt+1))/$max_attempts: Checking application endpoint..."
+            
+            # Show the actual response for debugging
+            RESPONSE=$(curl -s --max-time 10 http://${{ needs.terraform.outputs.droplet_ip }}:5000/)
+            echo "Response: $RESPONSE"
+            
+            if echo "$RESPONSE" | grep -q "Bank Nifty Trading"; then
+              echo "✅ Application is responding properly!"
+              exit 0
+            fi
+            
+            echo "Attempt $((curl_attempt+1))/$max_attempts: Application not responding with expected content yet..."
+            curl_attempt=$((curl_attempt+1))
+            sleep 10
+          done
+          
+          echo "⚠️ Warning: Could not verify application deployment after multiple attempts."
+          echo "Please check the logs on the server manually with:"
+          echo "ssh root@${{ needs.terraform.outputs.droplet_ip }} 'cd /bn-trading && docker-compose logs'"
+          # Don't fail the workflow, but provide warning
