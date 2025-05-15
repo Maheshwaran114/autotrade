@@ -2,6 +2,12 @@
 # List DigitalOcean Droplets
 # This script lists all droplets in your DigitalOcean account
 
+# Use provided token or load from test_config.sh if available
+if [ -z "$DIGITALOCEAN_TOKEN" ] && [ -f "./test_config.sh" ]; then
+  echo "Loading configuration from test_config.sh..."
+  source ./test_config.sh
+fi
+
 if [ -z "$DIGITALOCEAN_TOKEN" ]; then
   echo "DIGITALOCEAN_TOKEN environment variable is not set."
   echo "Please set it with: export DIGITALOCEAN_TOKEN=your_token"

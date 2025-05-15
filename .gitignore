@@ -47,3 +47,10 @@ terraform.tfvars
 # Operating System Files
 .DS_Store
 Thumbs.db
+github_secrets.txt
+ssh_key_id.txt
+test_config.sh
+*.pem
+*.key
+*.env
+config/credentials.yml

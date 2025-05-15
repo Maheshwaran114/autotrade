@@ -32,7 +32,35 @@ This guide provides solutions for common issues with the Bank Nifty Trading CI/C
 1. Verify that the `SSH_PRIVATE_KEY` and `SSH_KEY_ID` secrets are correctly set.
 2. Ensure the SSH key is registered with DigitalOcean and the ID is correct.
 3. Check if the droplet's firewall allows SSH connections (port 22).
-4. Increase the wait time for the droplet to initialize (currently set to 30 attempts).
+4. Run the `test_ssh_connection.sh` script locally to verify SSH connectivity with your key:
+   ```bash
+   chmod +x test_ssh_connection.sh
+   ./test_ssh_connection.sh
+   ```
+5. If using multiple droplets, ensure you're connecting to the correct one by using the utility scripts:
+   ```bash
+   chmod +x list_droplets.sh
+   export DIGITALOCEAN_TOKEN=your_token
+   ./list_droplets.sh
+   ```
+
+### Multiple Droplet Management
+
+**Symptom**: Multiple droplets with the same name are being created, causing confusion or added costs.
+
+**Solutions**:
+1. Use the `list_droplets.sh` script to identify all droplets:
+   ```bash
+   export DIGITALOCEAN_TOKEN=your_token
+   ./list_droplets.sh
+   ```
+2. Clean up unnecessary droplets with the `cleanup_droplets.sh` script:
+   ```bash
+   export DIGITALOCEAN_TOKEN=your_token
+   ./cleanup_droplets.sh
+   ```
+3. The CI/CD pipeline now has a check to reuse existing droplets before creating new ones.
+4. If you consistently see warnings about too many droplets, review why each run is creating a new droplet instead of reusing existing ones.
 
 ### Application Deployment Issues
 
@@ -46,18 +74,34 @@ This guide provides solutions for common issues with the Bank Nifty Trading CI/C
 
 ### Terraform Output Issues
 
-**Symptom**: The workflow cannot extract the floating IP from Terraform outputs.
+**Symptom**: The workflow cannot extract the floating IP or droplet IP from Terraform outputs.
 
 **Solutions**:
 1. Manually run `terraform output -json` to see the structure of the outputs.
-2. Verify that the `floating_ip` output is defined in the Terraform configuration.
-3. Try the fallback mechanism using the droplet's IP instead if the floating IP isn't available.
+2. Verify that the `droplet_ip` and `floating_ip` outputs are defined in the Terraform configuration.
+3. The workflow now has improved error handling for Terraform output extraction:
+   - Multiple methods to extract the IP (raw output, JSON parsing, grep fallback)
+   - Validation to ensure the extracted IP looks valid
+   - Support for existing droplets through the DigitalOcean API
+4. Check the workflow run logs to see which method successfully extracted the IP.
 
 ## Debugging Steps
 
 1. Check the GitHub Actions workflow logs for each job.
 2. Examine the deploy script's output to identify the exact step that failed.
-3. SSH into the droplet to investigate:
+3. Use the provided utility scripts for troubleshooting:
+   ```bash
+   # Test SSH connectivity to verify your SSH key works
+   ./test_ssh_connection.sh
+   
+   # List all droplets to identify the correct one
+   export DIGITALOCEAN_TOKEN=your_token
+   ./list_droplets.sh
+   
+   # Clean up unnecessary droplets
+   ./cleanup_droplets.sh
+   ```
+4. SSH into the droplet to investigate:
    ```
    ssh root@<droplet_ip>
    cd /bn-trading
