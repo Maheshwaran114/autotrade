@@ -381,6 +381,7 @@ jobs:
             IdentityFile ~/.ssh/id_bn_trading
           EOF
           chmod 600 ~/.ssh/config
+          chmod 600 ~/.ssh/config
           
           # Debugging: Show current SSH configuration
           echo "=== SSH config ==="
@@ -420,6 +421,11 @@ jobs:
           # Show SSH key format (just the type, no sensitive data)
           echo "SSH key format: (showing format only)"
           head -n 1 ~/.ssh/id_bn_trading | sed 's/PRIVATE KEY/----- PRIVATE KEY (redacted) -----/'
+          
+          # Run the SSH config validation script
+          echo "Running SSH config validation and fix script..."
+          chmod +x ./fix_ssh_config.sh || echo "Failed to make fix_ssh_config.sh executable"
+          ./fix_ssh_config.sh || echo "Fix script completed with non-zero exit code"
           
           # Support for both IPv4 and IPv6
           IP_REGEX='^([0-9]{1,3}\.){3}[0-9]{1,3}$|^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$'
@@ -469,13 +475,37 @@ jobs:
             echo "Will try to use: $DROPLET_IP now for testing connectivity"
           fi
           
+          # Enhanced network connectivity check before attempting SSH
+          echo "Performing network connectivity checks to $DROPLET_IP:22..."
+          for i in {1..3}; do
+            echo "Network check attempt $i:"
+            # Check if port 22 is reachable
+            if nc -z -v -w10 $DROPLET_IP 22 2>&1; then
+              echo "✅ Port 22 is reachable!"
+              break
+            else
+              echo "❌ Port 22 is not reachable on attempt $i"
+              # Try ping to check basic connectivity
+              ping -c 3 $DROPLET_IP || echo "Ping failed"
+              # Try traceroute to see network path
+              traceroute -m 15 $DROPLET_IP || echo "Traceroute failed"
+              sleep 10
+            fi
+          done
+          
           # Attempt SSH connections with better error handling and longer timeout
           MAX_ATTEMPTS=15
           for i in $(seq 1 $MAX_ATTEMPTS); do
             echo "Attempt $i of $MAX_ATTEMPTS: Testing SSH connection to $DROPLET_IP..."
             
-            # Try simple connectivity check with a longer timeout
-            if timeout 30 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$DROPLET_IP 'echo "SSH TEST: Connection successful"' 2>&1; then
+            # Add a delay before first connection attempts to allow server to be fully ready
+            if [ $i -eq 1 ]; then
+              echo "Waiting 30 seconds for server to be fully ready before first connection attempt..."
+              sleep 30
+            fi
+            
+            # Try simple connectivity check with a longer timeout and more verbose output
+            if timeout 60 ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -i ~/.ssh/id_bn_trading root@$DROPLET_IP 'echo "SSH TEST: Connection successful"' 2>&1; then
               echo "✅ SSH connection succeeded on attempt $i!"
               # Verify we can execute commands
               echo "Verifying command execution..."
@@ -487,12 +517,17 @@ jobs:
               fi
             else
               echo "❌ Connection attempt $i failed. Details:"
-              # More detailed error output with longer timeout
-              timeout 30 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$DROPLET_IP exit 2>&1 || true
+              # More detailed error output with longer timeout and maximum verbosity
+              timeout 60 ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -i ~/.ssh/id_bn_trading root@$DROPLET_IP exit 2>&1 || true
+              
+              # Check key and permission issues
+              echo "Verifying key format and permissions again..."
+              ls -la ~/.ssh/id_bn_trading
+              ssh-keygen -l -f ~/.ssh/id_bn_trading || echo "Key format verification failed"
               
               # Try alternative port if standard fails
               echo "Trying alternative port 2222..."
-              timeout 30 ssh -v -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$DROPLET_IP exit 2>&1 || true
+              timeout 30 ssh -vvv -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$DROPLET_IP exit 2>&1 || true
             fi
             
             if [ $i -eq $MAX_ATTEMPTS ]; then
@@ -542,7 +577,12 @@ jobs:
           
           # Try with more verbose output and explicit timeout for better diagnostics
           set +e  # Don't exit on error for this command
-          ssh -v -i ~/.ssh/id_bn_trading -o StrictHostKeyChecking=no -o ConnectTimeout=60 root@$DROPLET_IP << EOF
+          # Wait a bit to ensure server is fully ready for deployment commands
+          echo "Waiting 15 seconds before attempting deployment..."
+          sleep 15
+          
+          echo "Attempting deployment via SSH with enhanced parameters..."
+          ssh -vvv -i ~/.ssh/id_bn_trading -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ConnectTimeout=60 -o ConnectionAttempts=3 root@$DROPLET_IP << EOF
             echo "SSH connection successful!"
             # Print system information for debugging
             echo "=== System Information ==="
@@ -646,7 +686,7 @@ jobs:
           
           # Method 3: Check container status directly
           echo "Method 3: Checking container status via SSH..."
-          ssh -i ~/.ssh/id_bn_trading -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$DROPLET_IP << EOF || echo "SSH container check failed"
+          ssh -vvv -i ~/.ssh/id_bn_trading -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ConnectTimeout=30 -o ConnectionAttempts=3 root@$DROPLET_IP << EOF || echo "SSH container check failed"
             echo "Checking Docker containers..."
             docker ps | grep -i trading && echo "✅ Trading container is running" || echo "❌ Trading container not found"
             
@@ -673,11 +713,19 @@ jobs:
         if: failure()
         run: |
           # Make diagnostic scripts executable
-          chmod +x ./network_diagnostics.sh ./ssh_diagnostics.sh || echo "Could not make scripts executable"
+          chmod +x ./network_diagnostics.sh ./ssh_diagnostics.sh ./enhanced_ssh_diagnostics.sh || echo "Could not make scripts executable"
           
           echo "===== RUNNING EXTENDED DIAGNOSTICS ====="
           
-          # First check if the file exists
+          # Run the new enhanced SSH diagnostics first
+          if [ -f "./enhanced_ssh_diagnostics.sh" ]; then
+            echo "Running enhanced SSH connection diagnostics..."
+            ./enhanced_ssh_diagnostics.sh "$DROPLET_IP" || echo "Enhanced SSH diagnostics failed but continuing"
+          else
+            echo "Enhanced SSH diagnostics script not found."
+          fi
+          
+          # Run original network diagnostics
           if [ -f "./network_diagnostics.sh" ]; then
             echo "Running comprehensive network diagnostics..."
             ./network_diagnostics.sh || echo "Network diagnostics failed but continuing"
@@ -685,7 +733,7 @@ jobs:
             echo "Network diagnostics script not found."
           fi
           
-          # Run SSH diagnostics if SSH failed
+          # Run original SSH diagnostics
           if [ -f "./ssh_diagnostics.sh" ]; then
             echo "Running comprehensive SSH diagnostics..."
             ./ssh_diagnostics.sh "$DROPLET_IP" || echo "SSH diagnostics failed but continuing"
