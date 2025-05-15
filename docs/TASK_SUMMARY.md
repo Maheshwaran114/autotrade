@@ -96,3 +96,36 @@ services:
     ports:
       - "5000:5000"
 ```
+
+---
+
+## [2025-05-16] Terraform Infrastructure
+
+**Commit:** chore(infra): add Terraform DigitalOcean droplet  
+**Files:**  
+- `infra/main.tf`  
+- `infra/variables.tf`  
+- `infra/terraform.tfvars.example`  
+
+**Snippets:**  
+```hcl
+# infra/main.tf
+provider "digitalocean" {
+  token = var.digitalocean_token
+}
+
+resource "digitalocean_droplet" "bn_trading" {
+  image    = "docker-20-04"
+  name     = "bn-trading-server"
+  region   = "blr1"
+  size     = "s-2vcpu-4gb"
+```
+
+```hcl
+# infra/variables.tf
+variable "digitalocean_token" {
+  description = "DigitalOcean API token"
+  type        = string
+  sensitive   = true
+}
+```
