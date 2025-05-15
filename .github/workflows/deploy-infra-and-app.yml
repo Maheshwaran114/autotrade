@@ -60,7 +60,47 @@ jobs:
         working-directory: infra
         env:
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
-        run: terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+        run: |
+          # First check if droplet already exists to avoid hitting limits
+          echo "Checking for existing droplets..."
+          
+          # Check if terraform state already has the resources
+          if terraform state list 2>/dev/null | grep -q "digitalocean_droplet.bn-trading"; then
+            echo "Droplet already exists in Terraform state. Running apply to ensure configuration is up to date."
+            terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+          else
+            # Check DigitalOcean API directly for a droplet with our name
+            EXISTING_DROPLET=$(curl -s -X GET \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+              "https://api.digitalocean.com/v2/droplets?per_page=200" | 
+              grep -o '"name":"bn-trading-server"' || echo "")
+            
+            if [ -n "$EXISTING_DROPLET" ]; then
+              echo "Found existing droplet with name 'bn-trading-server'. Importing into Terraform state..."
+              # Get droplet ID
+              DROPLET_ID=$(curl -s -X GET \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+                "https://api.digitalocean.com/v2/droplets?per_page=200" | 
+                grep -o '"name":"bn-trading-server".*?[0-9]*' | 
+                grep -o '[0-9]*' | head -1)
+              
+              if [ -n "$DROPLET_ID" ]; then
+                echo "Importing droplet with ID: $DROPLET_ID"
+                terraform import digitalocean_droplet.bn-trading $DROPLET_ID || true
+                
+                # Now run apply to ensure configuration matches
+                terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+              else
+                echo "WARNING: Could not retrieve droplet ID. Proceeding with normal apply."
+                terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+              fi
+            else
+              echo "No existing droplet found. Proceeding with normal apply."
+              terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+            fi
+          fi
 
       - name: Output Infrastructure IPs
         working-directory: infra
