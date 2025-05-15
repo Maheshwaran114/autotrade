@@ -41,15 +41,15 @@ chmod 600 "$TEST_DIR/.ssh/config"
 
 if [ -f "$SSH_KEY_FILE" ]; then
   echo "Found SSH key at $SSH_KEY_FILE"
-  cp "$SSH_KEY_FILE" "$TEST_DIR/.ssh/id_rsa"
-  chmod 600 "$TEST_DIR/.ssh/id_rsa"
+  cp "$SSH_KEY_FILE" "$TEST_DIR/.ssh/id_bn_trading"
+  chmod 600 "$TEST_DIR/.ssh/id_bn_trading"
 else
   echo "⚠️ Warning: SSH key file not found at $SSH_KEY_FILE"
   echo "Please provide the path to your SSH private key:"
   read -r SSH_KEY_FILE
   if [ -f "$SSH_KEY_FILE" ]; then
-    cp "$SSH_KEY_FILE" "$TEST_DIR/.ssh/id_rsa"
-    chmod 600 "$TEST_DIR/.ssh/id_rsa"
+    cp "$SSH_KEY_FILE" "$TEST_DIR/.ssh/id_bn_trading"
+    chmod 600 "$TEST_DIR/.ssh/id_bn_trading"
   else
     echo "❌ Error: SSH key file not found. Exiting."
     exit 1
@@ -75,7 +75,7 @@ echo "Step 3: Testing SSH connection to $REMOTE_IP"
 echo "Testing SSH connectivity with verbose output..."
 
 echo "Attempting to connect with verbose output..."
-ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "$TEST_DIR/.ssh/id_rsa" "root@$REMOTE_IP" exit 0 || {
+ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "$TEST_DIR/.ssh/id_bn_trading" "root@$REMOTE_IP" exit 0 || {
   status=$?
   echo "❌ SSH connection test failed with status $status"
   echo
@@ -103,7 +103,7 @@ echo "✅ SSH connection successful!"
 # Step 4: Test deployment commands
 echo
 echo "Step 4: Testing deployment commands"
-ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i "$TEST_DIR/.ssh/id_rsa" "root@$REMOTE_IP" << 'TESTEOF'
+ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i "$TEST_DIR/.ssh/id_bn_trading" "root@$REMOTE_IP" << 'TESTEOF'
 echo "SSH connection established!"
 echo "Checking for /bn-trading directory..."
 if [ -d /bn-trading ]; then

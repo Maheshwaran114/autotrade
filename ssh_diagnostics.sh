@@ -20,32 +20,32 @@ echo "=== SSH Client Version ==="
 ssh -V || echo "Failed to determine SSH version"
 
 echo "=== SSH Key Status ==="
-if [ -f ~/.ssh/id_rsa ]; then
-  echo "✅ SSH private key exists at ~/.ssh/id_rsa"
+if [ -f ~/.ssh/id_bn_trading ]; then
+  echo "✅ SSH private key exists at ~/.ssh/id_bn_trading"
   # Check permissions
-  SSH_PERMS=$(stat -c "%a" ~/.ssh/id_rsa 2>/dev/null || stat -f "%p" ~/.ssh/id_rsa 2>/dev/null)
+  SSH_PERMS=$(stat -c "%a" ~/.ssh/id_bn_trading 2>/dev/null || stat -f "%p" ~/.ssh/id_bn_trading 2>/dev/null)
   if [[ "$SSH_PERMS" == "600" ]]; then
     echo "✅ SSH key has correct permissions (600)"
   else
     echo "❌ SSH key has incorrect permissions: $SSH_PERMS (should be 600)"
     echo "Fixing permissions..."
-    chmod 600 ~/.ssh/id_rsa
+    chmod 600 ~/.ssh/id_bn_trading
   fi
   
   # Verify key format
-  if grep -q "BEGIN" ~/.ssh/id_rsa; then
+  if grep -q "BEGIN" ~/.ssh/id_bn_trading; then
     echo "✅ SSH key appears to be in the correct format"
     # Show fingerprint
     echo "SSH key fingerprint:"
-    ssh-keygen -l -f ~/.ssh/id_rsa || echo "Failed to get fingerprint"
+    ssh-keygen -l -f ~/.ssh/id_bn_trading || echo "Failed to get fingerprint"
   else
     echo "❌ SSH key does not appear to be in the correct format!"
     echo "  The key should start with: BEGIN OPENSSH PRIVATE KEY or BEGIN RSA PRIVATE KEY"
     echo "  First few bytes of current key (hex):"
-    head -c 20 ~/.ssh/id_rsa | xxd -p || echo "Failed to read key"
+    head -c 20 ~/.ssh/id_bn_trading | xxd -p || echo "Failed to read key"
   fi
 else
-  echo "❌ SSH private key not found at ~/.ssh/id_rsa"
+  echo "❌ SSH private key not found at ~/.ssh/id_bn_trading"
   echo "  Please ensure the key is properly set in GitHub secrets"
 fi
 
@@ -96,7 +96,7 @@ traceroute -m 15 $TARGET_IP 2>&1 || echo "Traceroute failed or not available"
 
 echo "=== SSH Verbose Connection Test ==="
 echo "Attempting SSH connection with maximum verbosity..."
-timeout 30 ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$TARGET_IP exit 2>&1 || echo "SSH connection failed or timed out"
+timeout 30 ssh -vvv -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$TARGET_IP exit 2>&1 || echo "SSH connection failed or timed out"
 
 echo "=== SSH Authentication Methods ==="
 echo "Checking accepted authentication methods..."
@@ -104,7 +104,7 @@ ssh -o PreferredAuthentications=none -o BatchMode=yes -o StrictHostKeyChecking=n
 
 echo "=== SSH Key Verification ==="
 echo "Checking if your SSH public key is authorized on the server..."
-SSH_PUBKEY=$(ssh-keygen -y -f ~/.ssh/id_rsa 2>/dev/null || echo "Failed to extract public key")
+SSH_PUBKEY=$(ssh-keygen -y -f ~/.ssh/id_bn_trading 2>/dev/null || echo "Failed to extract public key")
 if [ -n "$SSH_PUBKEY" ] && [ "$SSH_PUBKEY" != "Failed to extract public key" ]; then
   echo "Public key for verification:"
   echo "$SSH_PUBKEY" | cut -d' ' -f1-2 # Only show key type and prefix for security

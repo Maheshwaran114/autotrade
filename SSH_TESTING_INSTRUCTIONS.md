@@ -19,7 +19,7 @@ If you're using GitHub Actions, the private key should be the one you've stored 
 
 1. First, find your SSH private key:
    - If you created an ED25519 key, it should be in `~/.ssh/id_ed25519` (not `id_ed25519.pub`)
-   - If you created an RSA key, it should be in `~/.ssh/id_rsa` (not `id_rsa.pub`)
+   - If you created an RSA key, it should be in `~/.ssh/id_bn_trading` (not `id_bn_trading.pub`)
 
 2. Run the SSH connection test:
    ```zsh
@@ -64,6 +64,6 @@ You can use the validation script to check if your key is in the correct format:
 
 The test script is now configured to use:
 - IP address: 64.227.129.85
-- Default SSH key location: ~/.ssh/id_rsa
+- Default SSH key location: ~/.ssh/id_bn_trading
 
 If your private key is in a different location, you'll be prompted to provide the path.
