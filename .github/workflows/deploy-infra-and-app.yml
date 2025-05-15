@@ -191,42 +191,55 @@ jobs:
         run: |
           # Create SSH directory with proper permissions
           mkdir -p ~/.ssh
+          mkdir -p /home/runner/.ssh
           chmod 700 ~/.ssh
+          chmod 700 /home/runner/.ssh
           
-          # Write private key to file with proper line endings
-          # The tr command ensures proper line endings
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          
-          # Debug the key format (only shows beginning/end, not the actual key)
-          echo "Checking key format (first and last lines):"
-          head -n 1 ~/.ssh/id_rsa
-          tail -n 1 ~/.ssh/id_rsa
-          
-          # Add DigitalOcean droplet to known hosts
-          ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> ~/.ssh/known_hosts
-          
-          # Set StrictHostKeyChecking to no for first connection
+          # Write the ssh config first
           cat > ~/.ssh/config << 'SSHCONFIG'
           Host *
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
+            IdentityFile ~/.ssh/id_rsa
           SSHCONFIG
           chmod 600 ~/.ssh/config
           
-          # Verify key file exists and has correct permissions
-          ls -la ~/.ssh/
+          # Ensure the private key is in the correct format - replace any \n with actual newlines
+          # This is important for OpenSSH private key format
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
           
-          # Debug output for troubleshooting (removes sensitive data)
-          echo "SSH key has been set up successfully"
+          # Create a symlink to ensure both paths work
+          ln -sf ~/.ssh/id_rsa /home/runner/.ssh/id_rsa
+          chmod 600 /home/runner/.ssh/id_rsa
+          
+          # Debug the key format (only shows beginning/end, not the actual key)
+          echo "Checking key format:"
+          head -n 2 ~/.ssh/id_rsa
+          tail -n 2 ~/.ssh/id_rsa
+          
+          # Add DigitalOcean droplet to known hosts
+          ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> ~/.ssh/known_hosts
+          
+          # Verify key files exist and have correct permissions
+          ls -la ~/.ssh/
+          ls -la /home/runner/.ssh/
+          
+          # Try to validate the key (will show if format is correct)
+          echo "Validating SSH key format:"
+          ssh-keygen -l -f ~/.ssh/id_rsa || echo "Key validation failed, but continuing"
 
       - name: Setup Server and Deploy Application
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          # Use debugging flags to see more information about SSH connection
-          ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${{ needs.terraform.outputs.droplet_ip }} << EOF
+          # Try connecting with a simpler command first
+          echo "Testing SSH connection..."
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${{ needs.terraform.outputs.droplet_ip }} 'echo "SSH connection successful"; hostname'
+          
+          # Now run the full deployment script
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${{ needs.terraform.outputs.droplet_ip }} << EOF
             echo "Setting up server environment..."
             # Update package lists
             apt-get update
