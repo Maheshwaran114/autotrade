@@ -15,9 +15,29 @@ fi
 
 echo "====== SSH CONNECTIVITY DIAGNOSTICS ======"
 echo "Target IP: $TARGET_IP"
+echo "Current date/time: $(date)"
+echo "Running as user: $(whoami)"
+echo "Working directory: $(pwd)"
 
 echo "=== SSH Client Version ==="
 ssh -V || echo "Failed to determine SSH version"
+
+echo "=== SSH Known Hosts File Check ==="
+if grep -q "UserKnownHostsFile /null" ~/.ssh/config 2>/dev/null; then
+  echo "❌ ERROR: Found incorrect UserKnownHostsFile /null in SSH config!"
+  echo "Fixing SSH config file..."
+  sed -i.bak 's|UserKnownHostsFile /null|UserKnownHostsFile /dev/null|g' ~/.ssh/config
+  echo "SSH config after fix:"
+  cat ~/.ssh/config || echo "Could not read SSH config"
+elif grep -q "UserKnownHostsFile /dev/null" ~/.ssh/config 2>/dev/null; then
+  echo "✅ SSH config has correct UserKnownHostsFile setting"
+  echo "SSH config contents:"
+  cat ~/.ssh/config || echo "Could not read SSH config"
+else
+  echo "⚠️ SSH config does not contain UserKnownHostsFile setting or config file doesn't exist"
+  echo "Current SSH config (if exists):"
+  cat ~/.ssh/config 2>/dev/null || echo "No SSH config file found"
+fi
 
 echo "=== SSH Key Status ==="
 if [ -f ~/.ssh/id_bn_trading ]; then
