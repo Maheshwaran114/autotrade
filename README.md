@@ -1,7 +1,41 @@
-# AutoTrade
+# Bank Nifty Options Trading System
 
-This repository has been reset and is ready for fresh development.
+An automated trading system for Bank Nifty options on the Indian stock market.
 
-## Getting Started
+## Table of Contents
+- [Introduction](#introduction)
+- [Architecture](#architecture)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Development](#development)
+- [Infrastructure](#infrastructure)
+- [CI/CD](#cicd)
+- [Contributing](#contributing)
+- [License](#license)
 
-Instructions for setting up and using the project will be added as development progresses.
+## Introduction
+Coming soon...
+
+## Architecture
+Coming soon...
+
+## Installation
+Coming soon...
+
+## Usage
+Coming soon...
+
+## Development
+Coming soon...
+
+## Infrastructure
+Coming soon...
+
+## CI/CD
+Coming soon...
+
+## Contributing
+Coming soon...
+
+## License
+Coming soon...

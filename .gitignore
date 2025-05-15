@@ -24,6 +24,16 @@ wheels/
 venv/
 env/
 ENV/
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Logs
+logs/
+*.log
+log/
 
 # IDE
 .idea/
@@ -33,21 +43,20 @@ ENV/
 
 # OS specific
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
-
-# Application specific
-*.log
-.env
-.env.local
-.env.development
-.env.test
-.env.production
 
 # Terraform
 .terraform/
 *.tfstate
-*.tfstate.backup
+*.tfstate.*
 .terraform.lock.hcl
+terraform.tfvars
 
 # Docker
 .dockerignore
+docker-compose.override.yml
