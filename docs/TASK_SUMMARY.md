@@ -111,6 +111,11 @@ resource "digitalocean_droplet" "bn-trading" {
   size   = "s-2vcpu-4gb"
   ssh_keys = [var.ssh_key_id]
 }
+
+resource "digitalocean_floating_ip" "bn-trading-ip" {
+  droplet_id = digitalocean_droplet.bn-trading.id
+  region     = digitalocean_droplet.bn-trading.region
+}
 ```
 
 ---
@@ -164,6 +169,44 @@ def test_hello_endpoint(client):
     response = client.get('/')
     assert response.status_code == 200
     assert b'Hello, Bank Nifty Trading System' in response.data
+```
+
+---
+
+## [2025-05-14] Infrastructure Configuration
+
+**Commit:** chore(infra): add Terraform DigitalOcean droplet with floating IP  
+**Files:**  
+- `infra/main.tf`  
+- `infra/variables.tf`  
+- `infra/terraform.tfvars.example`
+- `.github/workflows/cd.yml`
+
+**Snippets:**  
+```terraform
+# infra/main.tf
+resource "digitalocean_droplet" "bn-trading" {
+  image  = "docker-20-04"
+  name   = "bn-trading-server"
+  region = "blr1"
+  size   = "s-2vcpu-4gb"
+  ssh_keys = [var.ssh_key_id]
+}
+
+resource "digitalocean_floating_ip" "bn-trading-ip" {
+  droplet_id = digitalocean_droplet.bn-trading.id
+  region     = digitalocean_droplet.bn-trading.region
+}
+```
+
+```yaml
+# .github/workflows/cd.yml
+- name: Terraform Apply
+  working-directory: ./infra
+  run: terraform apply -auto-approve
+  env:
+    TF_VAR_digitalocean_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+    TF_VAR_ssh_key_id: ${{ secrets.SSH_KEY_ID }}
 ```
 
 ---
