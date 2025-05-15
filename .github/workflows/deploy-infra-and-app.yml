@@ -205,43 +205,53 @@ jobs:
               echo "Successfully extracted IP directly from state: $DIRECT_IP"
               echo "DROPLET_IP=$DIRECT_IP" >> $GITHUB_OUTPUT
               exit 0
+            else
+              echo "Direct extraction from state file failed to find IP"
             fi
           fi
           
           # Try different output formats to troubleshoot
           echo "Trying standard terraform output..."
-          terraform output || echo "Failed to get raw output"
+          STANDARD_OUTPUT=$(terraform output 2>/dev/null || echo "")
+          echo "$STANDARD_OUTPUT"
+          
+          # Extract IP from standard output
+          STANDARD_IP=$(echo "$STANDARD_OUTPUT" | grep droplet_ip | awk -F= '{print $2}' | tr -d ' "' || echo "")
+          if [[ "$STANDARD_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Successfully extracted IP from standard output: $STANDARD_IP"
+            echo "DROPLET_IP=$STANDARD_IP" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           
           # Try with -json to see full output structure
           echo "Trying JSON terraform output..."
-          terraform output -json || echo "Failed to get JSON output"
+          JSON_OUTPUT=$(terraform output -json 2>/dev/null || echo "")
+          echo "$JSON_OUTPUT"
           
-          # Now try the specific output we need
-          echo "Trying to get droplet_ip with -raw flag..."
-          # Use timeout to prevent hanging and robust parsing
-          IP=$(timeout 30s terraform output -raw droplet_ip 2>/dev/null | head -n1 | tr -d '\r\n' || echo "")
-          if [ -z "$IP" ]; then
-            echo "Warning: Could not get droplet_ip from terraform output -raw"
-            # Fallback to parsing standard terraform output
-            IP=$(terraform output | grep droplet_ip | awk -F= '{print $2}' | tr -d ' "' || echo "")
+          # Extract IP from JSON output
+          if [ -n "$JSON_OUTPUT" ]; then
+            # Use jq if available
+            if command -v jq &> /dev/null; then
+              JSON_IP=$(echo "$JSON_OUTPUT" | jq -r '.droplet_ip.value' 2>/dev/null || echo "")
+            else
+              # Fallback to grep/sed if jq not available
+              JSON_IP=$(echo "$JSON_OUTPUT" | grep -o '"value": "[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+"' | head -1 | sed 's/"value": "\([0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+\)"/\1/')
+            fi
+            
+            if [[ "$JSON_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Successfully extracted IP from JSON output: $JSON_IP"
+              echo "DROPLET_IP=$JSON_IP" >> $GITHUB_OUTPUT
+              exit 0
+            fi
           fi
           
-          # Final validation
-          if [ -z "$IP" ]; then
-            echo "Error: Failed to extract IP address from terraform outputs" >&2
-            echo "DROPLET_IP=EXTRACTION_FAILED" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          # COMPLETELY SKIP the -raw approach since it's proven problematic
+          echo "Skipping the problematic -raw approach"
           
-          # Extra validation - check if it looks like an IP
-          if ! echo "$IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Warning: '$IP' doesn't look like a valid IP address"
-            echo "DROPLET_IP=INVALID_FORMAT" >> $GITHUB_OUTPUT
-            exit 1
-          else
-            echo "Successfully extracted IP: $IP"
-            echo "DROPLET_IP=$IP" >> $GITHUB_OUTPUT
-          fi
+          # If we got here, we couldn't extract the IP using any method
+          echo "Error: Failed to extract IP address from terraform outputs" >&2
+          echo "DROPLET_IP=EXTRACTION_FAILED" >> $GITHUB_OUTPUT
+          exit 1
       
       # If we found an existing droplet, use its IP
       - name: Use existing droplet IP
