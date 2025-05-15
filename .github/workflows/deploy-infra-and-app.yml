@@ -67,7 +67,7 @@ jobs:
           # Check if terraform state already has the resources
           if terraform state list 2>/dev/null | grep -q "digitalocean_droplet.bn-trading"; then
             echo "Droplet already exists in Terraform state. Running apply to ensure configuration is up to date."
-            terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+            terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}" -var="create_floating_ip=false"
           else
             # Check DigitalOcean API directly for a droplet with our name
             EXISTING_DROPLET=$(curl -s -X GET \
@@ -91,14 +91,14 @@ jobs:
                 terraform import digitalocean_droplet.bn-trading $DROPLET_ID || true
                 
                 # Now run apply to ensure configuration matches
-                terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+                terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}" -var="create_floating_ip=false"
               else
                 echo "WARNING: Could not retrieve droplet ID. Proceeding with normal apply."
-                terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+                terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}" -var="create_floating_ip=false"
               fi
             else
               echo "No existing droplet found. Proceeding with normal apply."
-              terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+              terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}" -var="create_floating_ip=false"
             fi
           fi
 
