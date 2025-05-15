@@ -154,3 +154,41 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 ```
+
+---
+
+## [2025-05-16] CD Pipeline and Tests
+
+**Commit:** ci: add GitHub Actions CD workflow  
+**Files:**  
+- `.github/workflows/cd.yml`
+- `tests/test_app.py`
+- `tests/__init__.py`
+
+**Snippets:**  
+```yaml
+# .github/workflows/cd.yml
+name: CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+```
+
+```python
+# tests/test_app.py
+import sys
+import os
+
+# Add the src directory to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.app import app
+
+def test_hello_route():
+    """Test that the hello route returns the expected message."""
+```
