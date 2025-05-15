@@ -361,7 +361,7 @@ jobs:
           # Install SSH and network tools if not present
           echo "Installing additional diagnostic tools..."
           sudo apt-get update >/dev/null
-          sudo apt-get install -y openssh-client netcat-openbsd iputils-ping dnsutils >/dev/null || true
+          sudo apt-get install -y openssh-client netcat-openbsd iputils-ping dnsutils curl traceroute >/dev/null || true
           
           # Create SSH directory and configure permissions
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -376,9 +376,9 @@ jobs:
             ServerAliveCountMax 10
             ConnectTimeout 180
             IdentitiesOnly yes
-            LogLevel DEBUG3
+            LogLevel VERBOSE
             BatchMode yes
-            IdentityFile ~/.ssh/id_rsa
+            IdentityFile ~/.ssh/id_bn_trading
           EOF
           chmod 600 ~/.ssh/config
           
@@ -388,26 +388,38 @@ jobs:
           
           # Set up the SSH private key
           echo "Setting up SSH private key..."
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_bn_trading
+          chmod 600 ~/.ssh/id_bn_trading
           
           # Verify SSH key format
           echo "Verifying SSH key format..."
-          if ! grep -q "BEGIN" ~/.ssh/id_rsa; then
+          if ! grep -q "BEGIN" ~/.ssh/id_bn_trading && ! grep -q "KEY" ~/.ssh/id_bn_trading; then
             echo "ERROR: SSH key does not appear to be in the correct format!"
             echo "Make sure you have added the PRIVATE key to GitHub secrets, not the public key."
             echo "The key should start with: BEGIN OPENSSH PRIVATE KEY or BEGIN RSA PRIVATE KEY"
-            echo "First few characters of current key:"
-            head -c 20 ~/.ssh/id_rsa
+            echo "First few characters of current key (redacted for security):"
+            head -c 5 ~/.ssh/id_bn_trading
             exit 1
+          else
+            echo "✅ SSH key appears to be in the correct format"
+            echo "Testing SSH key validity..."
+            ssh-keygen -y -f ~/.ssh/id_bn_trading > /dev/null && echo "✅ Valid SSH key detected" || {
+              echo "❌ Invalid SSH key. Please check the SSH_PRIVATE_KEY secret in your GitHub repository."
+              # Save key info for debugging (first line only, no sensitive data)
+              head -n 1 ~/.ssh/id_bn_trading
+              exit 1
+            }
           fi
           
-          # Debugging: Check if key file exists and has correct permissions
-          ls -la ~/.ssh/id_rsa || { echo "Error: SSH key file not found or has incorrect permissions"; exit 1; }
+          # Check if key file exists and has correct permissions
+          ls -la ~/.ssh/id_bn_trading || { echo "❌ Error: SSH key file not found"; exit 1; }
           
-          # Debugging: Check key format (just first line, no sensitive data)
-          echo "SSH key format: (showing header only)"
-          head -n 1 ~/.ssh/id_rsa
+          # Fix permissions if needed
+          chmod 600 ~/.ssh/id_bn_trading
+          
+          # Show SSH key format (just the type, no sensitive data)
+          echo "SSH key format: (showing format only)"
+          head -n 1 ~/.ssh/id_bn_trading | sed 's/PRIVATE KEY/----- PRIVATE KEY (redacted) -----/'
           
           # Support for both IPv4 and IPv6
           IP_REGEX='^([0-9]{1,3}\.){3}[0-9]{1,3}$|^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$'
@@ -417,7 +429,18 @@ jobs:
             echo "Warning: Invalid droplet IP format: '$DROPLET_IP', skipping ssh-keyscan"
           else
             echo "Adding host key for $DROPLET_IP"
-            ssh-keyscan -H $DROPLET_IP >> ~/.ssh/known_hosts 2>/dev/null || echo "Warning: ssh-keyscan failed"
+            # Attempt multiple times with a delay in case the host isn't ready yet
+            for i in {1..3}; do
+              if ssh-keyscan -H $DROPLET_IP >> ~/.ssh/known_hosts 2>/dev/null; then
+                echo "✅ Successfully added host key on attempt $i"
+                break
+              else
+                echo "Warning: ssh-keyscan failed on attempt $i, retrying..."
+                sleep 5
+              fi
+            done
+            
+            # Try alternative port as fallback
             ssh-keyscan -H -p 2222 $DROPLET_IP >> ~/.ssh/known_hosts 2>/dev/null || echo "Warning: ssh-keyscan on port 2222 failed"
           fi
           
@@ -427,7 +450,7 @@ jobs:
           echo "SSH agent status: $SSH_ADD_EXIT (0=with keys, 1=without keys, 2=agent not running)"
           
           # Test if the SSH key is valid
-          ssh-keygen -l -f ~/.ssh/id_rsa || {
+          ssh-keygen -l -f ~/.ssh/id_bn_trading || {
             echo "ERROR: Invalid SSH key format detected!"
             echo "Please verify the SSH_PRIVATE_KEY secret in your GitHub repository."
             exit 1
@@ -452,11 +475,11 @@ jobs:
             echo "Attempt $i of $MAX_ATTEMPTS: Testing SSH connection to $DROPLET_IP..."
             
             # Try simple connectivity check with a longer timeout
-            if timeout 30 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$DROPLET_IP 'echo "SSH TEST: Connection successful"' 2>&1; then
+            if timeout 30 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$DROPLET_IP 'echo "SSH TEST: Connection successful"' 2>&1; then
               echo "✅ SSH connection succeeded on attempt $i!"
               # Verify we can execute commands
               echo "Verifying command execution..."
-              if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$DROPLET_IP 'whoami'; then
+              if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$DROPLET_IP 'whoami'; then
                 echo "✅ Command execution verified!"
                 break
               else
@@ -465,17 +488,17 @@ jobs:
             else
               echo "❌ Connection attempt $i failed. Details:"
               # More detailed error output with longer timeout
-              timeout 30 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$DROPLET_IP exit 2>&1 || true
+              timeout 30 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$DROPLET_IP exit 2>&1 || true
               
               # Try alternative port if standard fails
               echo "Trying alternative port 2222..."
-              timeout 30 ssh -v -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$DROPLET_IP exit 2>&1 || true
+              timeout 30 ssh -v -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_bn_trading root@$DROPLET_IP exit 2>&1 || true
             fi
             
             if [ $i -eq $MAX_ATTEMPTS ]; then
               echo "⚠️ Warning: SSH not available after $MAX_ATTEMPTS attempts, but continuing anyway"
               echo "Showing SSH key format for debugging:"
-              cat ~/.ssh/id_rsa | head -n 2
+              cat ~/.ssh/id_bn_trading | head -n 2
               echo "Checking if port 22 is open:"
               nc -zv $DROPLET_IP 22 || echo "Port 22 appears to be closed or filtered"
             else
@@ -519,7 +542,7 @@ jobs:
           
           # Try with more verbose output and explicit timeout for better diagnostics
           set +e  # Don't exit on error for this command
-          ssh -v -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ConnectTimeout=60 root@$DROPLET_IP << EOF
+          ssh -v -i ~/.ssh/id_bn_trading -o StrictHostKeyChecking=no -o ConnectTimeout=60 root@$DROPLET_IP << EOF
             echo "SSH connection successful!"
             # Print system information for debugging
             echo "=== System Information ==="
@@ -623,7 +646,7 @@ jobs:
           
           # Method 3: Check container status directly
           echo "Method 3: Checking container status via SSH..."
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$DROPLET_IP << EOF || echo "SSH container check failed"
+          ssh -i ~/.ssh/id_bn_trading -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$DROPLET_IP << EOF || echo "SSH container check failed"
             echo "Checking Docker containers..."
             docker ps | grep -i trading && echo "✅ Trading container is running" || echo "❌ Trading container not found"
             
