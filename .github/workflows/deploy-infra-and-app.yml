@@ -64,7 +64,7 @@ jobs:
 
       - name: Output Infrastructure IPs
         working-directory: infra
-        id: tf_output
+        id: ip_extract
         run: |
           # Capture all terraform outputs in a structured format
           echo "Getting Terraform outputs..."
@@ -97,20 +97,28 @@ jobs:
             fi
           fi
           
+          # Clean up the IP address - ensure it's only one line with no extra characters
+          FLOATING_IP=$(echo "$FLOATING_IP" | head -n 1 | tr -d '\n\r ')
+          
           # For debugging, show what we found
           echo "Extracted IP address: '$FLOATING_IP'"
           
-          # Set output and provide feedback
-          if [ -n "$FLOATING_IP" ]; then
-            # Use printf instead of echo to avoid any potential issues with special characters
-            printf "DROPLET_IP=%s\n" "$FLOATING_IP" >> "$GITHUB_OUTPUT"
-            echo "Successfully captured IP: $FLOATING_IP"
-          else
+          # Export the IP value to be used in a separate step
+          echo "IP_VALUE=$FLOATING_IP" >> $GITHUB_ENV
+          
+          if [ -z "$FLOATING_IP" ]; then
             echo "ERROR: Could not extract any IP address from Terraform outputs"
             echo "Showing terraform state for debugging..."
             terraform show
             exit 1
+          else
+            echo "Successfully captured IP: $FLOATING_IP"
           fi
+      
+      # Separate step for setting the output to avoid GitHub Actions output issues
+      - name: Set output value
+        id: tf_output
+        run: echo "DROPLET_IP=${{ env.IP_VALUE }}" >> $GITHUB_OUTPUT
 
   deploy:
     name: SSH & Deploy Application
