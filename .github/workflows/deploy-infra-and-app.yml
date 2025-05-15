@@ -115,9 +115,9 @@ jobs:
           terraform output -json || echo "Failed to get JSON output"
           
           # Now try the specific output we need
-          IP=$(terraform output -raw droplet_ip 2>/dev/null || echo "")
+          IP=$(terraform output -raw droplet_ip 2>/dev/null | head -n1 | tr -d '\r\n' || echo "")
           if [ -z "$IP" ]; then
-            echo "Warning: Could not get droplet_ip from terraform output"
+            echo "Warning: Could not get droplet_ip from terraform output -raw"
             # Fallback to parsing terraform output
             IP=$(terraform output | grep droplet_ip | awk -F= '{print $2}' | tr -d ' "' || echo "")
           fi
