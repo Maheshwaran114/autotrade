@@ -1,2 +1,3 @@
 digitalocean_token = "your-digitalocean-token-here"
 ssh_key_id = "your-ssh-key-fingerprint-here"
+create_floating_ip = false  # Set to true if you want a floating IP and have not reached your account limit
