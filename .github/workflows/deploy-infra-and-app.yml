@@ -191,9 +191,7 @@ jobs:
         run: |
           # Create SSH directory with proper permissions
           mkdir -p ~/.ssh
-          mkdir -p /home/runner/.ssh
           chmod 700 ~/.ssh
-          chmod 700 /home/runner/.ssh
           
           # Write the ssh config first
           cat > ~/.ssh/config << 'SSHCONFIG'
@@ -209,9 +207,14 @@ jobs:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Create a symlink to ensure both paths work
-          ln -sf ~/.ssh/id_rsa /home/runner/.ssh/id_rsa
-          chmod 600 /home/runner/.ssh/id_rsa
+          # Instead of symlink (which is causing the error), use a direct copy if needed
+          if [ "$(readlink -f ~/.ssh)" != "/home/runner/.ssh" ]; then
+            # Only copy if they're different directories
+            mkdir -p /home/runner/.ssh
+            chmod 700 /home/runner/.ssh
+            cp ~/.ssh/id_rsa /home/runner/.ssh/id_rsa
+            chmod 600 /home/runner/.ssh/id_rsa
+          fi
           
           # Debug the key format (only shows beginning/end, not the actual key)
           echo "Checking key format:"
@@ -220,6 +223,7 @@ jobs:
           
           # Add DigitalOcean droplet to known hosts
           ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> /home/runner/.ssh/known_hosts
           
           # Verify key files exist and have correct permissions
           ls -la ~/.ssh/
