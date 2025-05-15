@@ -9,8 +9,8 @@ echo "This script will test SSH connectivity similar to our GitHub Actions workf
 echo
 
 # Configuration - replace with real values as needed for testing
-REMOTE_IP=""  # Will be prompted if empty
-SSH_KEY_FILE="$HOME/.ssh/id_rsa"  # Adjust if you use a different key
+REMOTE_IP="64.227.129.85"  # Your DigitalOcean droplet IP
+SSH_KEY_FILE="$HOME/.ssh/id_bn_trading"  # Path to your BN Trading SSH key
 
 # Create temporary test directory
 TEST_DIR=$(mktemp -d)
@@ -74,15 +74,27 @@ echo
 echo "Step 3: Testing SSH connection to $REMOTE_IP"
 echo "Testing SSH connectivity with verbose output..."
 
-ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i "$TEST_DIR/.ssh/id_rsa" "root@$REMOTE_IP" exit 0 || {
+echo "Attempting to connect with verbose output..."
+ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "$TEST_DIR/.ssh/id_rsa" "root@$REMOTE_IP" exit 0 || {
   status=$?
   echo "❌ SSH connection test failed with status $status"
   echo
   echo "Troubleshooting next steps:"
   echo "1. Verify the IP address is correct: $REMOTE_IP"
-  echo "2. Check that the SSH key is correctly added to DigitalOcean and associated with this droplet"
-  echo "3. Ensure the droplet is running and accessible"
-  echo "4. Check firewall settings on DigitalOcean allow SSH connections"
+  echo "2. Check that your SSH key has been added to DigitalOcean account"
+  echo "   Run: ./register_ssh_key.sh"
+  echo "3. Ensure the droplet was created with your SSH key ID"
+  echo "4. Verify the droplet is running and accessible"
+  
+  # Try again with password if available
+  echo
+  echo "Would you like to try connecting with password authentication? (y/n)"
+  read -r TRY_PASSWORD
+  if [[ "$TRY_PASSWORD" == "y" ]]; then
+    echo "Attempting to connect with password..."
+    ssh -o StrictHostKeyChecking=no "root@$REMOTE_IP"
+  fi
+  
   exit $status
 }
 

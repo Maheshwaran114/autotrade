@@ -183,17 +183,24 @@ jobs:
           fi
           
           # Attempt SSH connections with better error handling
-          for i in {1..10}; do
-            echo "Attempt $i: Testing SSH connection to $DROPLET_IP..."
-            timeout 10 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa root@$DROPLET_IP exit 0 || echo "Connection failed but continuing..."
-            if [ $? -eq 0 ]; then
-              echo "SSH is available!"
+          MAX_ATTEMPTS=10
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Attempt $i of $MAX_ATTEMPTS: Testing SSH connection to $DROPLET_IP..."
+            if timeout 10 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa root@$DROPLET_IP 'echo "SSH TEST: Connection successful"' 2>&1; then
+              echo "✅ SSH connection succeeded on attempt $i!"
               break
+            else
+              echo "❌ Connection attempt $i failed. Details:"
+              timeout 10 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa root@$DROPLET_IP exit 2>&1 || true
             fi
-            echo "Sleeping before next attempt..."
-            sleep 10
-            if [ $i -eq 10 ]; then
-              echo "Warning: SSH not available after multiple retries, but continuing anyway"
+            
+            if [ $i -eq $MAX_ATTEMPTS ]; then
+              echo "⚠️ Warning: SSH not available after $MAX_ATTEMPTS attempts, but continuing anyway"
+              echo "Showing SSH key format for debugging:"
+              cat ~/.ssh/id_rsa | head -n 2
+            else
+              echo "Waiting 10 seconds before next attempt..."
+              sleep 10
             fi
           done
 
@@ -208,11 +215,23 @@ jobs:
           fi
           
           echo "Attempting to SSH to $DROPLET_IP and deploy application..."
-          ssh -v -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@$DROPLET_IP << 'EOF'
+          # Export environment variables that need to be available inside the heredoc
+          REPO="${GITHUB_REPOSITORY}"
+          USERNAME="${DOCKERHUB_USERNAME}"
+          
+          ssh -v -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
             echo "SSH connection successful!"
-            cd /bn-trading || { git clone https://github.com/${GITHUB_REPOSITORY}/ /bn-trading; cd /bn-trading; }
-            echo "Using repository: ${GITHUB_REPOSITORY}"
-            echo "Using Docker Hub: ${DOCKERHUB_USERNAME}"
+            # Install Docker Compose if not available
+            if ! command -v docker-compose &> /dev/null; then
+              echo "Installing Docker Compose..."
+              apt-get update
+              apt-get install -y docker-compose
+            fi
+            
+            cd /bn-trading || { git clone https://github.com/$REPO /bn-trading; cd /bn-trading; }
+            echo "Using repository: $REPO"
+            echo "Using Docker Hub: $USERNAME"
+            export DOCKERHUB_USERNAME="$USERNAME"
             docker-compose down || true
             docker-compose pull
             docker-compose up -d
@@ -227,4 +246,22 @@ jobs:
             echo "✅ Deployment verified"
           else
             echo "🚨 Deployment verification failed" && exit 1
+          fi
+          
+      - name: Count Existing Droplets
+        if: success()
+        env:
+          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+        run: |
+          echo "Checking for other bn-trading-server droplets..."
+          DROPLET_COUNT=$(curl -s -X GET \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+            "https://api.digitalocean.com/v2/droplets?per_page=200" | \
+            jq -r '.droplets[] | select(.name=="bn-trading-server")' | wc -l)
+          
+          echo "Found $DROPLET_COUNT droplets with name 'bn-trading-server'"
+          if [ "$DROPLET_COUNT" -gt 3 ]; then
+            echo "⚠️ Warning: You have $DROPLET_COUNT bn-trading-server droplets."
+            echo "Consider cleaning up old droplets using the cleanup_droplets.sh script."
           fi
