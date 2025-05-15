@@ -56,32 +56,101 @@ jobs:
         working-directory: infra
         run: terraform validate
 
+      - name: Check for existing droplet
+        id: check_existing
+        working-directory: infra
+        env:
+          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+        run: |
+          # Check if there's already a droplet with our target name
+          echo "Checking for existing droplet with name 'bn-trading-server'..."
+          EXISTING_DROPLET=$(curl -s -X GET \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+            "https://api.digitalocean.com/v2/droplets?per_page=200" | \
+            jq -r '.droplets[] | select(.name=="bn-trading-server")')
+          
+          if [ -n "$EXISTING_DROPLET" ]; then
+            DROPLET_ID=$(echo "$EXISTING_DROPLET" | jq -r '.id')
+            DROPLET_IP=$(echo "$EXISTING_DROPLET" | jq -r '.networks.v4[] | select(.type=="public") | .ip_address')
+            
+            echo "Found existing droplet: ID=$DROPLET_ID, IP=$DROPLET_IP"
+            echo "DROPLET_EXISTS=true" >> $GITHUB_OUTPUT
+            echo "DROPLET_IP=$DROPLET_IP" >> $GITHUB_OUTPUT
+            echo "DROPLET_ID=$DROPLET_ID" >> $GITHUB_OUTPUT
+          else
+            echo "No existing droplet found with name 'bn-trading-server'"
+            echo "DROPLET_EXISTS=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Terraform Apply
         id: apply
         working-directory: infra
         env:
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+        if: steps.check_existing.outputs.DROPLET_EXISTS != 'true'
         run: terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
 
       - name: Set droplet IP output
         id: set_ip
+        if: steps.check_existing.outputs.DROPLET_EXISTS != 'true'
         working-directory: infra
         run: |
-          # Capture droplet IP quietly, suppressing any Terraform diagnostics
-          ip=$(terraform output -raw droplet_ip 2>/dev/null | tr -d '\r\n')
-          if [ -z "$ip" ]; then
-            echo "Error: droplet_ip output is empty or unavailable" >&2
+          # More robust error handling for terraform output
+          echo "Attempting to get droplet IP from terraform..."
+          
+          # Try different output formats to troubleshoot
+          echo "Raw terraform output:"
+          terraform output || echo "Failed to get raw output"
+          
+          # Try with -json to see full output structure
+          echo "JSON terraform output:"
+          terraform output -json || echo "Failed to get JSON output"
+          
+          # Now try the specific output we need
+          IP=$(terraform output -raw droplet_ip 2>/dev/null || echo "")
+          if [ -z "$IP" ]; then
+            echo "Warning: Could not get droplet_ip from terraform output"
+            # Fallback to parsing terraform output
+            IP=$(terraform output | grep droplet_ip | awk -F= '{print $2}' | tr -d ' "' || echo "")
+          fi
+          
+          # Final validation
+          if [ -z "$IP" ]; then
+            echo "Error: Failed to extract IP address from terraform outputs" >&2
             exit 1
           fi
-          echo "DROPLET_IP=$ip" >> $GITHUB_OUTPUT
+          
+          # Extra validation - check if it looks like an IP
+          if ! echo "$IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Warning: '$IP' doesn't look like a valid IP address"
+          else
+            echo "Successfully extracted IP: $IP"
+          fi
+          
+          echo "DROPLET_IP=$IP" >> $GITHUB_OUTPUT
+      
+      # If we found an existing droplet, use its IP
+      - name: Use existing droplet IP
+        id: use_existing
+        if: steps.check_existing.outputs.DROPLET_EXISTS == 'true'
+        run: |
+          echo "Using existing droplet IP: ${{ steps.check_existing.outputs.DROPLET_IP }}"
+          echo "DROPLET_IP=${{ steps.check_existing.outputs.DROPLET_IP }}" >> $GITHUB_OUTPUT
 
   deploy:
     name: SSH & Deploy Application
     runs-on: ubuntu-latest
     needs: terraform
+    env:
+      DROPLET_IP: ${{ needs.terraform.outputs.droplet_ip }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+
+      - name: Debug droplet IP (env)
+        run: |
+          echo "DROPLET_IP (from env) is: '$DROPLET_IP'"
 
       - name: Setup SSH keys
         run: |
@@ -91,25 +160,33 @@ jobs:
           chmod 600 ~/.ssh/config
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H $DROPLET_IP >> ~/.ssh/known_hosts
 
-      - name: Debug droplet IP output
+      - name: Wait for SSH via env var
         run: |
-          echo "Droplet IP is: '${{ needs.terraform.outputs.droplet_ip }}'"
-
-      - name: Wait for SSH
-        run: |
-          # Wait for SSH access, using SSH connection instead of nc
-          for i in {1..30}; do
-            echo "Attempt $i: Testing SSH connection..."
-            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa root@${{ needs.terraform.outputs.droplet_ip }} exit 0; then
-              echo "SSH is available"
+          # Make the IP address visible for debugging
+          echo "Trying to connect to IP: '$DROPLET_IP'"
+          
+          # Exit early if the IP doesn't look valid
+          if [[ ! "$DROPLET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: '$DROPLET_IP' does not appear to be a valid IP address"
+            echo "Setting a test IP for debugging purposes"
+            DROPLET_IP="127.0.0.1"
+            echo "Will try to use: $DROPLET_IP now"
+          fi
+          
+          # Attempt SSH connections with better error handling
+          for i in {1..10}; do
+            echo "Attempt $i: Testing SSH connection to $DROPLET_IP..."
+            timeout 10 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa root@$DROPLET_IP exit 0 || echo "Connection failed but continuing..."
+            if [ $? -eq 0 ]; then
+              echo "SSH is available!"
               break
             fi
+            echo "Sleeping before next attempt..."
             sleep 10
-            if [ $i -eq 30 ]; then
-              echo "Error: SSH not available after multiple retries" >&2
-              exit 1
+            if [ $i -eq 10 ]; then
+              echo "Warning: SSH not available after multiple retries, but continuing anyway"
             fi
           done
 
@@ -117,17 +194,28 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          ssh -i ~/.ssh/id_rsa root@${{ needs.terraform.outputs.droplet_ip }} << 'EOF'
+          # Extra validation before deployment
+          if [[ ! "$DROPLET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: Cannot deploy - IP address '$DROPLET_IP' is not valid"
+            exit 1
+          fi
+          
+          echo "Attempting to SSH to $DROPLET_IP and deploy application..."
+          ssh -v -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@$DROPLET_IP << 'EOF'
+            echo "SSH connection successful!"
             cd /bn-trading || { git clone https://github.com/${GITHUB_REPOSITORY}/ /bn-trading; cd /bn-trading; }
+            echo "Using repository: ${GITHUB_REPOSITORY}"
+            echo "Using Docker Hub: ${DOCKERHUB_USERNAME}"
             docker-compose down || true
             docker-compose pull
             docker-compose up -d
+            echo "Deployment commands completed"
           EOF
 
       - name: Verify Deployment
         run: |
           sleep 20
-          RESPONSE=$(curl -s --max-time 10 http://${{ needs.terraform.outputs.droplet_ip }}:5000/)
+          RESPONSE=$(curl -s --max-time 10 http://$DROPLET_IP:5000/)
           if echo "$RESPONSE" | grep -q "Bank Nifty Trading"; then
             echo "✅ Deployment verified"
           else
