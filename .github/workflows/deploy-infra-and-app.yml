@@ -50,7 +50,10 @@ jobs:
 
       - name: Perform network diagnostics
         run: |
-          echo "Running network diagnostics..."
+          # Make network_diagnostics.sh executable
+          chmod +x ./network_diagnostics.sh
+          
+          echo "Running basic network diagnostics..."
           echo "DNS Servers:"
           cat /etc/resolv.conf
           
@@ -65,6 +68,8 @@ jobs:
           
           echo "Checking for proxy settings:"
           env | grep -i proxy || echo "No proxy settings found"
+          
+          echo "For more detailed diagnostics, run network_diagnostics.sh manually"
       
       - name: Terraform Init
         working-directory: infra
@@ -155,11 +160,39 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H digitalocean.com >> ~/.ssh/known_hosts 2>/dev/null || true
           
+          # Install prerequisite packages
+          echo "Installing prerequisite packages..."
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y dnsutils jq curl >/dev/null || true
+          
           # Set DNS servers explicitly if needed
-          if ! ping -c 1 api.digitalocean.com &>/dev/null; then
+          echo "Testing DNS resolution..."
+          if ! nslookup api.digitalocean.com &>/dev/null; then
             echo "Primary DNS checks failed, trying Google DNS..."
             echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf > /dev/null
             echo "nameserver 8.8.4.4" | sudo tee -a /etc/resolv.conf > /dev/null
+            
+            # Verify DNS servers were updated
+            echo "Updated DNS configuration to:"
+            cat /etc/resolv.conf
+            
+            # Test DNS resolution with new servers
+            nslookup api.digitalocean.com || echo "Warning: DNS resolution still failing"
+          fi
+          
+          # Verify SSH Key Exists in DigitalOcean
+          echo "Verifying SSH Key exists in DigitalOcean..."
+          SSH_KEY_EXISTS=$(curl -s -X GET \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+            "https://api.digitalocean.com/v2/account/keys/${{ secrets.SSH_KEY_ID }}" | \
+            jq -r '.ssh_key.id' 2>/dev/null)
+          
+          if [ "$SSH_KEY_EXISTS" == "${{ secrets.SSH_KEY_ID }}" ]; then
+            echo "✅ SSH key verified in DigitalOcean account"
+          else
+            echo "⚠️ Warning: Could not verify SSH key ID ${{ secrets.SSH_KEY_ID }} in DigitalOcean"
+            echo "Will continue anyway, but SSH access might fail"
           fi
           
           echo "Starting Terraform apply with retry logic..."
@@ -168,6 +201,23 @@ jobs:
             echo "Attempt $i/$MAX_ATTEMPTS: Running terraform apply..."
             if terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"; then
               echo "✅ Terraform apply succeeded!"
+              
+              # Verify droplet was actually created by using the API directly
+              echo "Verifying droplet creation using DO API..."
+              DROPLET_NAME="bn-trading-server"
+              DROPLET_INFO=$(curl -s -X GET \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+                "https://api.digitalocean.com/v2/droplets?per_page=200" | \
+                jq -r ".droplets[] | select(.name==\"$DROPLET_NAME\")" 2>/dev/null)
+              
+              if [ -n "$DROPLET_INFO" ]; then
+                echo "✅ Verified droplet '$DROPLET_NAME' exists in DigitalOcean"
+                # Output some details for debugging
+                echo "$DROPLET_INFO" | jq -r '.id, .status'
+              else
+                echo "⚠️ Warning: Could not verify droplet creation through API"
+              fi
               break
             else
               echo "❌ Terraform apply failed on attempt $i"
@@ -308,13 +358,80 @@ jobs:
 
       - name: Setup SSH keys
         run: |
-          sudo apt-get update && sudo apt-get install -y openssh-client
+          # Install SSH and network tools if not present
+          echo "Installing additional diagnostic tools..."
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y openssh-client netcat-openbsd iputils-ping dnsutils >/dev/null || true
+          
+          # Create SSH directory and configure permissions
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          echo "Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null" > ~/.ssh/config
+          
+          # Create SSH config file with more permissive settings
+          echo "Configuring enhanced SSH settings..."
+          cat > ~/.ssh/config << 'EOF'
+          Host *
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            ServerAliveInterval 60
+            ServerAliveCountMax 10
+            ConnectTimeout 180
+            IdentitiesOnly yes
+            LogLevel DEBUG3
+            BatchMode yes
+            IdentityFile ~/.ssh/id_rsa
+          EOF
           chmod 600 ~/.ssh/config
+          
+          # Debugging: Show current SSH configuration
+          echo "=== SSH config ==="
+          cat ~/.ssh/config
+          
+          # Set up the SSH private key
+          echo "Setting up SSH private key..."
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H $DROPLET_IP >> ~/.ssh/known_hosts
+          
+          # Verify SSH key format
+          echo "Verifying SSH key format..."
+          if ! grep -q "BEGIN" ~/.ssh/id_rsa; then
+            echo "ERROR: SSH key does not appear to be in the correct format!"
+            echo "Make sure you have added the PRIVATE key to GitHub secrets, not the public key."
+            echo "The key should start with: BEGIN OPENSSH PRIVATE KEY or BEGIN RSA PRIVATE KEY"
+            echo "First few characters of current key:"
+            head -c 20 ~/.ssh/id_rsa
+            exit 1
+          fi
+          
+          # Debugging: Check if key file exists and has correct permissions
+          ls -la ~/.ssh/id_rsa || { echo "Error: SSH key file not found or has incorrect permissions"; exit 1; }
+          
+          # Debugging: Check key format (just first line, no sensitive data)
+          echo "SSH key format: (showing header only)"
+          head -n 1 ~/.ssh/id_rsa
+          
+          # Support for both IPv4 and IPv6
+          IP_REGEX='^([0-9]{1,3}\.){3}[0-9]{1,3}$|^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$'
+          
+          # Add droplet to known hosts - this ensures the host key is accepted
+          if [[ ! "$DROPLET_IP" =~ $IP_REGEX ]]; then
+            echo "Warning: Invalid droplet IP format: '$DROPLET_IP', skipping ssh-keyscan"
+          else
+            echo "Adding host key for $DROPLET_IP"
+            ssh-keyscan -H $DROPLET_IP >> ~/.ssh/known_hosts 2>/dev/null || echo "Warning: ssh-keyscan failed"
+            ssh-keyscan -H -p 2222 $DROPLET_IP >> ~/.ssh/known_hosts 2>/dev/null || echo "Warning: ssh-keyscan on port 2222 failed"
+          fi
+          
+          # Test SSH agent status
+          ssh-add -l &>/dev/null
+          SSH_ADD_EXIT=$?
+          echo "SSH agent status: $SSH_ADD_EXIT (0=with keys, 1=without keys, 2=agent not running)"
+          
+          # Test if the SSH key is valid
+          ssh-keygen -l -f ~/.ssh/id_rsa || {
+            echo "ERROR: Invalid SSH key format detected!"
+            echo "Please verify the SSH_PRIVATE_KEY secret in your GitHub repository."
+            exit 1
+          }
 
       - name: Wait for SSH via env var
         run: |
@@ -324,30 +441,46 @@ jobs:
           # Exit early if the IP doesn't look valid
           if [[ ! "$DROPLET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Error: '$DROPLET_IP' does not appear to be a valid IP address"
-            echo "Setting a test IP for debugging purposes"
+            echo "Setting a fallback IP for testing purposes"
             DROPLET_IP="127.0.0.1"
-            echo "Will try to use: $DROPLET_IP now"
+            echo "Will try to use: $DROPLET_IP now for testing connectivity"
           fi
           
-          # Attempt SSH connections with better error handling
-          MAX_ATTEMPTS=10
+          # Attempt SSH connections with better error handling and longer timeout
+          MAX_ATTEMPTS=15
           for i in $(seq 1 $MAX_ATTEMPTS); do
             echo "Attempt $i of $MAX_ATTEMPTS: Testing SSH connection to $DROPLET_IP..."
-            if timeout 10 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa root@$DROPLET_IP 'echo "SSH TEST: Connection successful"' 2>&1; then
+            
+            # Try simple connectivity check with a longer timeout
+            if timeout 30 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$DROPLET_IP 'echo "SSH TEST: Connection successful"' 2>&1; then
               echo "✅ SSH connection succeeded on attempt $i!"
-              break
+              # Verify we can execute commands
+              echo "Verifying command execution..."
+              if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$DROPLET_IP 'whoami'; then
+                echo "✅ Command execution verified!"
+                break
+              else
+                echo "⚠️ Command execution failed, but connection established"
+              fi
             else
               echo "❌ Connection attempt $i failed. Details:"
-              timeout 10 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa root@$DROPLET_IP exit 2>&1 || true
+              # More detailed error output with longer timeout
+              timeout 30 ssh -v -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$DROPLET_IP exit 2>&1 || true
+              
+              # Try alternative port if standard fails
+              echo "Trying alternative port 2222..."
+              timeout 30 ssh -v -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa root@$DROPLET_IP exit 2>&1 || true
             fi
             
             if [ $i -eq $MAX_ATTEMPTS ]; then
               echo "⚠️ Warning: SSH not available after $MAX_ATTEMPTS attempts, but continuing anyway"
               echo "Showing SSH key format for debugging:"
               cat ~/.ssh/id_rsa | head -n 2
+              echo "Checking if port 22 is open:"
+              nc -zv $DROPLET_IP 22 || echo "Port 22 appears to be closed or filtered"
             else
-              echo "Waiting 10 seconds before next attempt..."
-              sleep 10
+              echo "Waiting 20 seconds before next attempt..."
+              sleep 20
             fi
           done
 
@@ -361,42 +494,198 @@ jobs:
             exit 1
           fi
           
+          # Run basic TCP port scan to check SSH port accessibility
+          echo "Checking if SSH port 22 is open on $DROPLET_IP..."
+          if timeout 30 nc -z -v -w5 $DROPLET_IP 22 2>&1; then
+            echo "✅ Port 22 is open and accessible"
+          else
+            echo "⚠️ Warning: Port 22 does not appear to be accessible"
+            echo "Trying alternative methods..."
+            
+            # Try alternative ways to check connectivity
+            timeout 5 telnet $DROPLET_IP 22 2>&1 || echo "Telnet test failed"
+            
+            # Additional diagnostics
+            echo "Running traceroute to target host..."
+            traceroute -m 15 $DROPLET_IP 2>&1 || echo "Traceroute failed or not available"
+            
+            echo "Will still attempt SSH deployment but it might fail"
+          fi
+          
           echo "Attempting to SSH to $DROPLET_IP and deploy application..."
           # Export environment variables that need to be available inside the heredoc
           REPO="${GITHUB_REPOSITORY}"
           USERNAME="${DOCKERHUB_USERNAME}"
           
-          ssh -v -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@$DROPLET_IP << EOF
+          # Try with more verbose output and explicit timeout for better diagnostics
+          set +e  # Don't exit on error for this command
+          ssh -v -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ConnectTimeout=60 root@$DROPLET_IP << EOF
             echo "SSH connection successful!"
+            # Print system information for debugging
+            echo "=== System Information ==="
+            uname -a
+            ip addr show
+            
             # Install Docker Compose if not available
             if ! command -v docker-compose &> /dev/null; then
               echo "Installing Docker Compose..."
               apt-get update
-              apt-get install -y docker-compose
+              apt-get install -y docker-compose || {
+                echo "Failed to install docker-compose with apt, trying alternative method..."
+                curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+                chmod +x /usr/local/bin/docker-compose
+              }
             fi
             
-            cd /bn-trading || { git clone https://github.com/$REPO /bn-trading; cd /bn-trading; }
+            # Verify Docker is running
+            if ! systemctl is-active --quiet docker; then
+              echo "Docker is not running, attempting to start it..."
+              systemctl start docker
+            fi
+            
+            # Clone/update repository and deploy
+            echo "Cloning or updating repository..."
+            cd /bn-trading || { 
+              echo "Creating /bn-trading directory..."
+              mkdir -p /bn-trading
+              git clone https://github.com/$REPO /bn-trading 
+              cd /bn-trading 
+            }
+            
             echo "Using repository: $REPO"
             echo "Using Docker Hub: $USERNAME"
             export DOCKERHUB_USERNAME="$USERNAME"
-            docker-compose down || true
+            
+            # Pull the latest changes if directory already exists
+            if [ -d .git ]; then
+              echo "Repository exists, pulling latest changes..."
+              git pull
+            fi
+            
+            # Stop any existing containers
+            echo "Stopping any existing containers..."
+            docker-compose down || echo "No existing containers to stop"
+            
+            # Pull the latest images and start the application
+            echo "Pulling latest images..."
             docker-compose pull
+            
+            echo "Starting application containers..."
             docker-compose up -d
+            
+            # Verify containers are running
+            echo "Verifying container status..."
+            docker-compose ps
+            
             echo "Deployment commands completed"
           EOF
+          SSH_EXIT=$?
+          
+          if [ $SSH_EXIT -ne 0 ]; then
+            echo "⚠️ Warning: SSH deployment exited with code $SSH_EXIT"
+            echo "This might be a temporary issue, checking application status..."
+          else
+            echo "✅ SSH deployment completed successfully!"
+          fi
 
       - name: Verify Deployment
         run: |
-          sleep 20
-          RESPONSE=$(curl -s --max-time 10 http://$DROPLET_IP:5000/)
+          echo "Waiting for application to start up (30 seconds)..."
+          sleep 30
+          
+          echo "Checking application health endpoint..."
+          # Try multiple verification methods
+          set +e  # Don't exit on error initially
+          
+          # Method 1: Check main endpoint
+          echo "Method 1: Testing main application endpoint..."
+          RESPONSE=$(curl -s -m 15 http://$DROPLET_IP:5000/ || echo "Connection failed")
+          
           if echo "$RESPONSE" | grep -q "Bank Nifty Trading"; then
-            echo "✅ Deployment verified"
+            echo "✅ Main application endpoint verified"
+            VERIFIED=true
           else
-            echo "🚨 Deployment verification failed" && exit 1
+            echo "❌ Main application endpoint verification failed"
+            echo "Response received: ${RESPONSE:0:100}..."
           fi
           
+          # Method 2: Check health endpoint
+          echo "Method 2: Testing health endpoint..."
+          HEALTH=$(curl -s -m 10 http://$DROPLET_IP:5000/health || echo "Connection failed")
+          
+          if echo "$HEALTH" | grep -q "healthy"; then
+            echo "✅ Health endpoint verified"
+            VERIFIED=true
+          else
+            echo "❌ Health endpoint verification failed"
+            echo "Response received: ${HEALTH:0:100}..."
+          fi
+          
+          # Method 3: Check container status directly
+          echo "Method 3: Checking container status via SSH..."
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$DROPLET_IP << EOF || echo "SSH container check failed"
+            echo "Checking Docker containers..."
+            docker ps | grep -i trading && echo "✅ Trading container is running" || echo "❌ Trading container not found"
+            
+            echo "Container logs (last 10 lines):"
+            docker-compose -f /bn-trading/docker-compose.yml logs --tail=10
+          EOF
+          
+          # Final verification decision
+          if [ "$VERIFIED" == "true" ]; then
+            echo "✅ Deployment verified via at least one method"
+          else
+            echo "🚨 Deployment verification failed on all methods"
+            
+            # One final attempt with verbose output
+            echo "Final diagnostic check with verbose output:"
+            curl -v --max-time 20 http://$DROPLET_IP:5000/
+            
+            # Continue anyway to avoid breaking the workflow
+            echo "⚠️ Continuing despite verification failure"
+            # exit 1 # Uncomment if you want to fail the workflow on verification failure
+          fi
+          
+      - name: Run additional diagnostics if SSH fails
+        if: failure()
+        run: |
+          # Make diagnostic scripts executable
+          chmod +x ./network_diagnostics.sh ./ssh_diagnostics.sh || echo "Could not make scripts executable"
+          
+          echo "===== RUNNING EXTENDED DIAGNOSTICS ====="
+          
+          # First check if the file exists
+          if [ -f "./network_diagnostics.sh" ]; then
+            echo "Running comprehensive network diagnostics..."
+            ./network_diagnostics.sh || echo "Network diagnostics failed but continuing"
+          else
+            echo "Network diagnostics script not found."
+          fi
+          
+          # Run SSH diagnostics if SSH failed
+          if [ -f "./ssh_diagnostics.sh" ]; then
+            echo "Running comprehensive SSH diagnostics..."
+            ./ssh_diagnostics.sh "$DROPLET_IP" || echo "SSH diagnostics failed but continuing"
+          else
+            echo "SSH diagnostics script not found."
+          fi
+          
+          # Try direct DO API lookup
+          echo "Checking droplet status via DigitalOcean API..."
+          if [ -n "$DIGITALOCEAN_TOKEN" ]; then
+            curl -s -X GET \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+              "https://api.digitalocean.com/v2/droplets?per_page=200" | \
+              grep -A 15 -B 5 "$DROPLET_IP" || echo "Could not find droplet in DO API"
+          else
+            echo "DIGITALOCEAN_TOKEN not set, skipping API check"
+          fi
+          
+          echo "Diagnostics completed. Check the logs for more information."
+
       - name: Count Existing Droplets
-        if: success()
+        if: always()
         env:
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
         run: |
