@@ -1,2 +1,2 @@
-digitalocean_token = "your-do-api-token"
-ssh_key_id = "your-ssh-key-id"
+digitalocean_token = "your-digitalocean-token-here"
+ssh_key_id = "your-ssh-key-fingerprint-here"
