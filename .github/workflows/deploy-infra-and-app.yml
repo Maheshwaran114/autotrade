@@ -64,7 +64,9 @@ jobs:
         working-directory: infra
         id: tf_output
         run: |
-          echo "DROPLET_IP=$(terraform output -raw floating_ip)" >> $GITHUB_OUTPUT
+          FLOATING_IP=$(terraform output -json floating_ip | jq -r '.')
+          echo "DROPLET_IP=${FLOATING_IP}" >> $GITHUB_OUTPUT
+          echo "Using Floating IP: ${FLOATING_IP}"
 
   deploy:
     name: SSH & Deploy Application
