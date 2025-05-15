@@ -33,3 +33,33 @@ __pycache__/
 *$py.class
 ...
 ```
+
+---
+
+## [2025-05-16] Placeholder Application
+
+**Commit:** feat: add placeholder app and dependencies  
+**Files:**  
+- `src/app.py`  
+- `requirements.txt`  
+
+**Snippets:**  
+```python
+# src/app.py
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return "Hello, Bank Nifty Trading System"
+```
+
+```
+# requirements.txt
+flask==2.0.1
+pandas==1.3.3
+numpy==1.21.2
+scikit-learn==1.0
+upstox-python-api==2.0.0
+```
