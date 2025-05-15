@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./src:/app
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://tradinguser:tradingpass@db:5432/tradingdb
+
+  db:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=tradinguser
+      - POSTGRES_PASSWORD=tradingpass
+      - POSTGRES_DB=tradingdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
