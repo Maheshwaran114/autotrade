@@ -20,10 +20,38 @@ Coming soon...
 Coming soon...
 
 ## Installation
-Coming soon...
+To install and set up the Bank Nifty Options Trading System:
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/autotrade.git
+   cd autotrade
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Set up environment variables:
+   ```bash
+   cp example.env .env
+   # Edit .env with your configuration
+   ```
+
+4. Run the application:
+   ```bash
+   python src/app.py
+   ```
 
 ## Usage
-Coming soon...
+You can also run the application using Docker:
+
+```bash
+docker-compose up
+```
+
+Access the application at http://localhost:5000
 
 ## Development
 Coming soon...
