@@ -187,63 +187,42 @@ jobs:
             fi
           done
 
-      - name: Setup SSH for DigitalOcean
+      - name: Setup SSH keys
         run: |
+          # Install SSH client and tools
+          sudo apt-get update && sudo apt-get install -y openssh-client
+
           # Create SSH directory with proper permissions
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           
-          # Write the ssh config first
-          cat > ~/.ssh/config << 'SSHCONFIG'
-          Host *
+          # Create simple SSH config
+          echo "Host *
             StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-            IdentityFile ~/.ssh/id_rsa
-          SSHCONFIG
+            UserKnownHostsFile /dev/null" > ~/.ssh/config
           chmod 600 ~/.ssh/config
           
-          # Ensure the private key is in the correct format - replace any \n with actual newlines
-          # This is important for OpenSSH private key format
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
+          # Write private key to file - simple approach
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Instead of symlink (which is causing the error), use a direct copy if needed
-          if [ "$(readlink -f ~/.ssh)" != "/home/runner/.ssh" ]; then
-            # Only copy if they're different directories
-            mkdir -p /home/runner/.ssh
-            chmod 700 /home/runner/.ssh
-            cp ~/.ssh/id_rsa /home/runner/.ssh/id_rsa
-            chmod 600 /home/runner/.ssh/id_rsa
-          fi
-          
-          # Debug the key format (only shows beginning/end, not the actual key)
-          echo "Checking key format:"
-          head -n 2 ~/.ssh/id_rsa
-          tail -n 2 ~/.ssh/id_rsa
-          
-          # Add DigitalOcean droplet to known hosts
+          # Add the DigitalOcean droplet to known hosts
           ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> ~/.ssh/known_hosts
-          ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> /home/runner/.ssh/known_hosts
           
-          # Verify key files exist and have correct permissions
-          ls -la ~/.ssh/
-          ls -la /home/runner/.ssh/
-          
-          # Try to validate the key (will show if format is correct)
-          echo "Validating SSH key format:"
-          ssh-keygen -l -f ~/.ssh/id_rsa || echo "Key validation failed, but continuing"
+          # Show key format for debugging
+          echo "Checking SSH key:"
+          ssh-keygen -l -f ~/.ssh/id_rsa || echo "Invalid key format, but continuing"
 
-      - name: Setup Server and Deploy Application
+      - name: Deploy to server
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          # Try connecting with a simpler command first
-          echo "Testing SSH connection..."
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${{ needs.terraform.outputs.droplet_ip }} 'echo "SSH connection successful"; hostname'
+          # Test SSH connection first with verbose output
+          ssh -v -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ needs.terraform.outputs.droplet_ip }} 'echo "SSH connected successfully"; hostname'
           
-          # Now run the full deployment script
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${{ needs.terraform.outputs.droplet_ip }} << EOF
+          # Main deployment
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ needs.terraform.outputs.droplet_ip }} << 'EOF'
             echo "Setting up server environment..."
             # Update package lists
             apt-get update
@@ -262,7 +241,7 @@ jobs:
               
               echo \
                 "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-                \$(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+                $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
               
               apt-get update
               apt-get install -y docker-ce docker-ce-cli containerd.io
@@ -270,13 +249,16 @@ jobs:
             
             if ! command -v docker-compose &> /dev/null; then
               echo "Installing Docker Compose..."
-              curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+              curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
               chmod +x /usr/local/bin/docker-compose
             fi
             
             # Install required utilities
             apt-get install -y curl jq
-            
+EOF
+
+          # Continue with the deployment
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@${{ needs.terraform.outputs.droplet_ip }} << EOF
             # Clone or update the repository
             REPO="${GITHUB_REPOSITORY}"
             if [ -d /bn-trading ]; then
@@ -299,35 +281,12 @@ jobs:
             echo "Checking deployment status..."
             if docker-compose ps | grep -q "Up"; then
               echo "Deployment successful - containers are running"
-              
-              # Wait for the application to be fully operational
-              echo "Waiting for application to initialize..."
-              HEALTH_CHECK_ATTEMPTS=0
-              MAX_ATTEMPTS=10
-              
-              while [ \$HEALTH_CHECK_ATTEMPTS -lt \$MAX_ATTEMPTS ]; do
-                if curl -s --max-time 5 http://localhost:5000/health | grep -q "ok"; then
-                  echo "✅ Health check passed: Application is fully operational"
-                  break
-                fi
-                
-                echo "Health check attempt \$((HEALTH_CHECK_ATTEMPTS+1))/\$MAX_ATTEMPTS: Waiting for application to be ready..."
-                HEALTH_CHECK_ATTEMPTS=\$((HEALTH_CHECK_ATTEMPTS+1))
-                sleep 5
-                
-                # If we've reached max attempts, show warning but don't fail
-                if [ \$HEALTH_CHECK_ATTEMPTS -eq \$MAX_ATTEMPTS ]; then
-                  echo "⚠️ Warning: Health check did not pass within expected time."
-                  echo "Application containers are running, but health check endpoint isn't responding."
-                  echo "This might indicate an application initialization issue."
-                fi
-              done
             else
               echo "ERROR: Deployment failed - containers are not running"
               docker-compose logs
               exit 1
             fi
-          EOF
+EOF
 
       - name: Verify Deployment
         run: |
@@ -353,9 +312,10 @@ jobs:
             echo "Attempt $((curl_attempt+1))/$max_attempts: Application not responding with expected content yet..."
             curl_attempt=$((curl_attempt+1))
             sleep 10
+            
+            if [ $curl_attempt -eq $max_attempts ]; then
+              echo "⚠️ Warning: Could not verify application deployment after multiple attempts."
+              echo "Please check the logs on the server manually with:"
+              echo "ssh root@${{ needs.terraform.outputs.droplet_ip }} 'cd /bn-trading && docker-compose logs'"
+            fi
           done
-          
-          echo "⚠️ Warning: Could not verify application deployment after multiple attempts."
-          echo "Please check the logs on the server manually with:"
-          echo "ssh root@${{ needs.terraform.outputs.droplet_ip }} 'cd /bn-trading && docker-compose logs'"
-          # Don't fail the workflow, but provide warning
