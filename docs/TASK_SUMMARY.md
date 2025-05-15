@@ -63,3 +63,36 @@ numpy==1.21.2
 scikit-learn==1.0
 upstox-python-api==2.0.0
 ```
+
+---
+
+## [2025-05-16] Docker Setup
+
+**Commit:** chore: add Dockerfile and docker-compose  
+**Files:**  
+- `Dockerfile`  
+- `docker-compose.yml`  
+
+**Snippets:**  
+```dockerfile
+# Dockerfile
+FROM python:3.9-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+```
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+```
