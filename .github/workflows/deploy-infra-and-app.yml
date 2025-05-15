@@ -187,16 +187,24 @@ jobs:
             fi
           done
 
-      - name: Add SSH key
-        uses: shimataro/ssh-key-action@v2
-        with:
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          known_hosts: "unnecessary"
-
-      - name: Add DigitalOcean droplet to known hosts
+      - name: Setup SSH for DigitalOcean
         run: |
+          # Create SSH directory with proper permissions
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Write private key to file
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Add DigitalOcean droplet to known hosts
           ssh-keyscan -H ${{ needs.terraform.outputs.droplet_ip }} >> ~/.ssh/known_hosts
+          
+          # Verify key file exists and has correct permissions
+          ls -la ~/.ssh/id_rsa
+          
+          # Debug output for troubleshooting (removes sensitive data)
+          echo "SSH key has been set up successfully"
 
       - name: Setup Server and Deploy Application
         env:
