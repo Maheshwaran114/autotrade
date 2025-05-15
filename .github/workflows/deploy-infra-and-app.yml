@@ -48,13 +48,67 @@ jobs:
         with:
           terraform_version: 1.5.0
 
+      - name: Perform network diagnostics
+        run: |
+          echo "Running network diagnostics..."
+          echo "DNS Servers:"
+          cat /etc/resolv.conf
+          
+          echo "Testing connectivity to api.digitalocean.com:"
+          ping -c 3 api.digitalocean.com || echo "Ping failed but continuing"
+          
+          echo "Testing DNS resolution:"
+          nslookup api.digitalocean.com || echo "DNS lookup failed but continuing"
+          
+          echo "Testing HTTPS connectivity:"
+          curl -sSL https://api.digitalocean.com/v2/account -o /dev/null -w "Response code: %{http_code}\n" || echo "HTTPS test failed but continuing"
+          
+          echo "Checking for proxy settings:"
+          env | grep -i proxy || echo "No proxy settings found"
+      
       - name: Terraform Init
         working-directory: infra
-        run: terraform init
+        run: |
+          # Retry logic for terraform init
+          MAX_ATTEMPTS=3
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Attempt $i/$MAX_ATTEMPTS: Running terraform init..."
+            if terraform init; then
+              echo "✅ Terraform init succeeded!"
+              break
+            else
+              echo "❌ Terraform init failed on attempt $i"
+              if [ $i -eq $MAX_ATTEMPTS ]; then
+                echo "All $MAX_ATTEMPTS attempts failed, stopping."
+                exit 1
+              else
+                echo "Waiting 30 seconds before next attempt..."
+                sleep 30
+              fi
+            fi
+          done
 
       - name: Terraform Validate
         working-directory: infra
-        run: terraform validate
+        run: |
+          # Retry logic for terraform validate
+          MAX_ATTEMPTS=3
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Attempt $i/$MAX_ATTEMPTS: Running terraform validate..."
+            if terraform validate; then
+              echo "✅ Terraform validate succeeded!"
+              break
+            else
+              echo "❌ Terraform validate failed on attempt $i"
+              if [ $i -eq $MAX_ATTEMPTS ]; then
+                echo "All $MAX_ATTEMPTS attempts failed, stopping."
+                exit 1
+              else
+                echo "Waiting 10 seconds before next attempt..."
+                sleep 10
+              fi
+            fi
+          done
 
       - name: Check for existing droplet
         id: check_existing
@@ -96,7 +150,36 @@ jobs:
         env:
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
         if: steps.check_existing.outputs.DROPLET_EXISTS != 'true'
-        run: terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"
+        run: |
+          # Configure SSH known hosts to avoid trust issues
+          mkdir -p ~/.ssh
+          ssh-keyscan -H digitalocean.com >> ~/.ssh/known_hosts 2>/dev/null || true
+          
+          # Set DNS servers explicitly if needed
+          if ! ping -c 1 api.digitalocean.com &>/dev/null; then
+            echo "Primary DNS checks failed, trying Google DNS..."
+            echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf > /dev/null
+            echo "nameserver 8.8.4.4" | sudo tee -a /etc/resolv.conf > /dev/null
+          fi
+          
+          echo "Starting Terraform apply with retry logic..."
+          MAX_ATTEMPTS=3
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Attempt $i/$MAX_ATTEMPTS: Running terraform apply..."
+            if terraform apply -auto-approve -var="digitalocean_token=${{ secrets.DIGITALOCEAN_TOKEN }}" -var="ssh_key_id=${{ secrets.SSH_KEY_ID }}"; then
+              echo "✅ Terraform apply succeeded!"
+              break
+            else
+              echo "❌ Terraform apply failed on attempt $i"
+              if [ $i -eq $MAX_ATTEMPTS ]; then
+                echo "All $MAX_ATTEMPTS attempts failed, stopping."
+                exit 1
+              else
+                echo "Waiting 60 seconds before next attempt..."
+                sleep 60
+              fi
+            fi
+          done
 
       - name: Set droplet IP output
         id: set_ip
@@ -106,36 +189,59 @@ jobs:
           # More robust error handling for terraform output
           echo "Attempting to get droplet IP from terraform..."
           
+          # First, ensure terraform is working
+          if ! terraform version &>/dev/null; then
+            echo "Warning: terraform command appears to be unavailable"
+            echo "Path: $(which terraform)"
+            echo "Directory contents: $(ls -la $(dirname $(which terraform)))"
+          fi
+          
+          # Try accessing terraform state directly as a fallback
+          if [ -f terraform.tfstate ]; then
+            echo "Found terraform state file, attempting direct extraction..."
+            # Extract IP from terraform.tfstate using grep and sed
+            DIRECT_IP=$(grep -o '"droplet_ip":[[:space:]]*"[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+"' terraform.tfstate | sed 's/"droplet_ip":[[:space:]]*"\([0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+\)"/\1/')
+            if [ -n "$DIRECT_IP" ]; then
+              echo "Successfully extracted IP directly from state: $DIRECT_IP"
+              echo "DROPLET_IP=$DIRECT_IP" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          
           # Try different output formats to troubleshoot
-          echo "Raw terraform output:"
+          echo "Trying standard terraform output..."
           terraform output || echo "Failed to get raw output"
           
           # Try with -json to see full output structure
-          echo "JSON terraform output:"
+          echo "Trying JSON terraform output..."
           terraform output -json || echo "Failed to get JSON output"
           
           # Now try the specific output we need
-          IP=$(terraform output -raw droplet_ip 2>/dev/null | head -n1 | tr -d '\r\n' || echo "")
+          echo "Trying to get droplet_ip with -raw flag..."
+          # Use timeout to prevent hanging and robust parsing
+          IP=$(timeout 30s terraform output -raw droplet_ip 2>/dev/null | head -n1 | tr -d '\r\n' || echo "")
           if [ -z "$IP" ]; then
             echo "Warning: Could not get droplet_ip from terraform output -raw"
-            # Fallback to parsing terraform output
+            # Fallback to parsing standard terraform output
             IP=$(terraform output | grep droplet_ip | awk -F= '{print $2}' | tr -d ' "' || echo "")
           fi
           
           # Final validation
           if [ -z "$IP" ]; then
             echo "Error: Failed to extract IP address from terraform outputs" >&2
+            echo "DROPLET_IP=EXTRACTION_FAILED" >> $GITHUB_OUTPUT
             exit 1
           fi
           
           # Extra validation - check if it looks like an IP
           if ! echo "$IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "Warning: '$IP' doesn't look like a valid IP address"
+            echo "DROPLET_IP=INVALID_FORMAT" >> $GITHUB_OUTPUT
+            exit 1
           else
             echo "Successfully extracted IP: $IP"
+            echo "DROPLET_IP=$IP" >> $GITHUB_OUTPUT
           fi
-          
-          echo "DROPLET_IP=$IP" >> $GITHUB_OUTPUT
       
       # If we found an existing droplet, use its IP
       - name: Use existing droplet IP
