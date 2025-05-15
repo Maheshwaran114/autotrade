@@ -65,6 +65,7 @@ jobs:
 
       - name: Set droplet IP output
         id: set_ip
+        working-directory: infra
         run: |
           # Capture droplet IP quietly, suppressing any Terraform diagnostics
           ip=$(terraform output -raw droplet_ip 2>/dev/null | tr -d '\r\n')
@@ -84,13 +85,18 @@ jobs:
 
       - name: Wait for SSH
         run: |
+          # Wait for SSH access, using SSH connection instead of nc
           for i in {1..30}; do
-            if nc -z -w5 ${{ needs.terraform.outputs.droplet_ip }} 22; then
-              sleep 15
+            echo "Attempt $i: Testing SSH connection..."
+            if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa root@${{ needs.terraform.outputs.droplet_ip }} exit 0; then
+              echo "SSH is available"
               break
             fi
             sleep 10
-            if [ $i -eq 30 ]; then exit 1; fi
+            if [ $i -eq 30 ]; then
+              echo "Error: SSH not available after multiple retries" >&2
+              exit 1
+            fi
           done
 
       - name: Setup SSH keys
