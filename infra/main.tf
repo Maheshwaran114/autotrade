@@ -13,11 +13,11 @@ provider "digitalocean" {
 }
 
 resource "digitalocean_droplet" "bn_trading" {
-  image    = "docker-20-04"
-  name     = "bn-trading-server"
-  region   = "blr1"
-  size     = "s-2vcpu-4gb"
-  ssh_keys = var.ssh_key_ids
+  image              = "docker-20-04"
+  name               = "bn-trading-server"
+  region             = "blr1"
+  size               = "s-2vcpu-4gb"
+  ssh_keys           = var.ssh_key_fingerprints
 }
 
 # We're not using floating IPs due to account limits

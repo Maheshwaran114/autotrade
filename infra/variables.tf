@@ -4,8 +4,8 @@ variable "digitalocean_token" {
   sensitive   = true
 }
 
-variable "ssh_key_ids" {
-  description = "List of SSH key IDs to add to the droplet"
+variable "ssh_key_fingerprints" {
+  description = "List of SSH key fingerprints to add to the droplet"
   type        = list(string)
   default     = []
 }

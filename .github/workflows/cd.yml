@@ -125,6 +125,34 @@ jobs:
           exit 1
         fi
     
+    # Add troubleshooting step to diagnose SSH issues
+    - name: SSH Connection Diagnostic
+      if: success()
+      run: |
+        DROPLET_IP="${{ steps.terraform_apply.outputs.ip }}"
+        echo "Running SSH diagnostic tests on $DROPLET_IP..."
+        
+        # Save private key to file for testing
+        echo "Writing SSH key to temporary file for testing..."
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/do_key
+        chmod 600 ~/.ssh/do_key
+        
+        # Check SSH key format
+        echo "Checking SSH key format..."
+        ssh-keygen -l -f ~/.ssh/do_key || echo "Failed to read SSH key - might be in wrong format"
+        
+        # Try extracting public key from private key
+        echo "Attempting to extract public key from private key..."
+        ssh-keygen -y -f ~/.ssh/do_key || echo "Failed to extract public key - key might be invalid"
+        
+        # Attempt verbose SSH connection to get more info
+        echo "Attempting verbose SSH connection to get diagnostic info..."
+        ssh -v -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/do_key root@$DROPLET_IP 'echo SSH Connection Test' || echo "Direct SSH test failed"
+        
+        # Clean up temporary key file
+        rm -f ~/.ssh/do_key
+        
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master
       with:
@@ -132,8 +160,9 @@ jobs:
         username: root
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 22
-        timeout: 60s
+        timeout: 120s
         command_timeout: 20m
+        use_insecure_cipher: true  # Try this if regular connection fails
         script: |
           echo "Connected to droplet - Setting up application..."
           
