@@ -32,6 +32,101 @@ jobs:
       with:
         terraform_version: 1.0.0
     
+    # Add this step to ensure SSH keys are properly registered before applying Terraform
+    - name: Register SSH Keys with DigitalOcean
+      id: register_ssh_keys
+      run: |
+        echo "Registering SSH keys with DigitalOcean..."
+        
+        # Save SSH key to file
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/do_key
+        chmod 600 ~/.ssh/do_key
+        
+        # Check and fix key format if needed
+        if ! grep -q "BEGIN .* PRIVATE KEY" ~/.ssh/do_key || ! grep -q "END .* PRIVATE KEY" ~/.ssh/do_key; then
+          echo "SSH key is missing header/footer. Adding RSA format markers..."
+          TMP_KEY=$(cat ~/.ssh/do_key)
+          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/do_key
+          echo "$TMP_KEY" >> ~/.ssh/do_key
+          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/do_key
+          chmod 600 ~/.ssh/do_key
+        fi
+        
+        # Extract public key and register with DigitalOcean
+        SSH_PUBKEY=$(ssh-keygen -y -f ~/.ssh/do_key || echo "Failed to extract")
+        
+        if [[ "$SSH_PUBKEY" == "Failed to extract" ]]; then
+          echo "Could not extract public key from private key. Generating new key pair..."
+          ssh-keygen -t rsa -b 4096 -f ~/.ssh/new_deploy_key -N "" -q
+          SSH_PUBKEY=$(cat ~/.ssh/new_deploy_key.pub)
+          
+          # Save new private key for later use
+          echo "NEW_PRIVATE_KEY<<EOF" >> $GITHUB_ENV
+          cat ~/.ssh/new_deploy_key >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+          # Use new key for deployment
+          cp ~/.ssh/new_deploy_key ~/.ssh/do_key
+          chmod 600 ~/.ssh/do_key
+        fi
+        
+        # Register the key with DigitalOcean
+        TIMESTAMP=$(date +%s)
+        KEY_NAME="github-action-key-$TIMESTAMP"
+        
+        REGISTER_RESPONSE=$(curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+          -d "{\"name\":\"$KEY_NAME\",\"public_key\":\"$SSH_PUBKEY\"}" \
+          "https://api.digitalocean.com/v2/account/keys")
+        
+        KEY_ID=$(echo "$REGISTER_RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        KEY_FINGERPRINT=$(echo "$REGISTER_RESPONSE" | grep -o '"fingerprint":"[^"]*"' | head -1 | cut -d'"' -f4)
+        
+        if [ -n "$KEY_FINGERPRINT" ]; then
+          echo "Successfully registered SSH key with fingerprint: $KEY_FINGERPRINT"
+          echo "ssh_fingerprint=$KEY_FINGERPRINT" >> $GITHUB_OUTPUT
+        else
+          echo "Failed to register SSH key. API response:"
+          echo "$REGISTER_RESPONSE"
+          echo "Will proceed with existing keys in terraform.tfvars"
+        fi
+      
+    - name: Update Terraform SSH Keys
+      run: |
+        cd infra
+        SSH_FINGERPRINT="${{ steps.register_ssh_keys.outputs.ssh_fingerprint }}"
+        
+        if [ -n "$SSH_FINGERPRINT" ]; then
+          echo "Updating terraform.tfvars with new SSH key fingerprint..."
+          
+          # Read existing fingerprints
+          EXISTING_FINGERPRINTS=$(grep -o 'ssh_key_fingerprints = \[\([^]]*\)\]' terraform.tfvars || echo "ssh_key_fingerprints = []")
+          
+          # Check if fingerprint is already in the list
+          if [[ "$EXISTING_FINGERPRINTS" != *"$SSH_FINGERPRINT"* ]]; then
+            # Create new fingerprints list with the new one added
+            if [[ "$EXISTING_FINGERPRINTS" == *"[]"* ]]; then
+              # Empty list
+              NEW_FINGERPRINTS="ssh_key_fingerprints = [\"$SSH_FINGERPRINT\"]"
+            else
+              # Add to existing list
+              NEW_FINGERPRINTS=$(echo "$EXISTING_FINGERPRINTS" | sed -e "s/]/, \"$SSH_FINGERPRINT\"]/")
+            fi
+            
+            # Update terraform.tfvars
+            sed -i "s/ssh_key_fingerprints = \[\([^]]*\)\]/$NEW_FINGERPRINTS/" terraform.tfvars
+            
+            echo "Updated SSH fingerprints in terraform.tfvars"
+            grep "ssh_key_fingerprints" terraform.tfvars
+          else
+            echo "SSH fingerprint already in terraform.tfvars, no update needed"
+          fi
+        else
+          echo "No new SSH fingerprint available, using existing keys in terraform.tfvars"
+        fi
+    
     - name: Terraform Init
       run: |
         cd infra
@@ -127,77 +222,211 @@ jobs:
     
     # Add troubleshooting step to diagnose SSH issues
     - name: SSH Connection Diagnostic
-      if: success()
+      id: ssh_diagnostic
       run: |
         DROPLET_IP="${{ steps.terraform_apply.outputs.ip }}"
         echo "Running SSH diagnostic tests on $DROPLET_IP..."
         
-        # Save private key to file for testing
-        echo "Writing SSH key to temporary file for testing..."
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/do_key
-        chmod 600 ~/.ssh/do_key
+        # We should already have the SSH key from previous steps
+        echo "Using SSH key from registration step..."
         
-        # Check SSH key format
+        # Check SSH key format and contents
         echo "Checking SSH key format..."
+        HAS_HEADER=$(grep -c "BEGIN .* PRIVATE KEY" ~/.ssh/do_key || echo "0")
+        HAS_FOOTER=$(grep -c "END .* PRIVATE KEY" ~/.ssh/do_key || echo "0")
+        
+        if [ "$HAS_HEADER" -eq "0" ] || [ "$HAS_FOOTER" -eq "0" ]; then
+          echo "⚠️ Error: SSH key is still missing header/footer despite earlier fixes."
+          echo "This is a critical issue that needs to be addressed manually."
+          echo "Please check the SSH_PRIVATE_KEY secret in GitHub."
+          exit 1
+        fi
+        
+        # Display key info
+        echo "SSH key information:"
         ssh-keygen -l -f ~/.ssh/do_key || echo "Failed to read SSH key - might be in wrong format"
         
-        # Try extracting public key from private key
-        echo "Attempting to extract public key from private key..."
-        EXTRACTED_PUBKEY=$(ssh-keygen -y -f ~/.ssh/do_key || echo "Failed to extract public key - key might be invalid")
-        echo "$EXTRACTED_PUBKEY"
+        # Extract public key for verification
+        echo "Extracting public key for verification..."
+        EXTRACTED_PUBKEY=$(ssh-keygen -y -f ~/.ssh/do_key || echo "Failed to extract")
         
-        # Calculate fingerprint from extracted public key for comparison
-        echo "Fingerprint from extracted public key:"
-        echo "$EXTRACTED_PUBKEY" > ~/.ssh/do_key.pub
-        ssh-keygen -l -f ~/.ssh/do_key.pub || echo "Failed to calculate fingerprint"
-        
-        # Try SSH connection with debug1 and more options
-        echo "Attempting verbose SSH connection with alternative options..."
-        ssh -v -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o PubkeyAuthentication=yes -o PreferredAuthentications=publickey -i ~/.ssh/do_key root@$DROPLET_IP 'echo SSH Connection Test' || echo "Direct SSH test failed"
-        
-        # Generate public key file for adding to droplet
-        if [ -n "$EXTRACTED_PUBKEY" ]; then
+        if [[ "$EXTRACTED_PUBKEY" == "Failed to extract" ]]; then
+          echo "Error: Still cannot extract public key from private key."
+          echo "Using the previously generated key instead."
+          echo "This is likely due to an issue with the SSH_PRIVATE_KEY secret format."
+          
+          if [ -n "${{ env.NEW_PRIVATE_KEY }}" ]; then
+            echo "Using previously generated new key..."
+            EXTRACTED_PUBKEY=$(ssh-keygen -y -f ~/.ssh/new_deploy_key || echo "Failed to extract again")
+          else
+            echo "No backup key available. This is a critical error."
+            exit 1
+          fi
+        else
+          echo "Successfully extracted public key!"
+          
+          # Store the public key for other steps
           echo "$EXTRACTED_PUBKEY" > ~/.ssh/do_key.pub
-          echo "Successfully created public key file from private key"
+          chmod 644 ~/.ssh/do_key.pub
+          
+          # Store the public key in environment for other steps
+          echo "EXTRACTED_PUBKEY<<EOF" >> $GITHUB_ENV
+          echo "$EXTRACTED_PUBKEY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
         fi
+        
+        # Test SSH connection with various options for maximum compatibility
+        echo "Attempting SSH connection with multiple options..."
+        
+        # Try with standard options
+        if ssh -v -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/do_key root@$DROPLET_IP 'echo "SSH Connection Test - Standard"'; then
+          echo "✅ SSH connection successful with standard options!"
+          exit 0
+        fi
+        
+        # Try with insecure cipher options
+        echo "Trying with insecure cipher options..."
+        if ssh -v -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o PubkeyAuthentication=yes -o PreferredAuthentications=publickey -o "HostKeyAlgorithms=+ssh-rsa" -o "PubkeyAcceptedAlgorithms=+ssh-rsa" -i ~/.ssh/do_key root@$DROPLET_IP 'echo "SSH Connection Test - Insecure"'; then
+          echo "✅ SSH connection successful with insecure cipher options!"
+          
+          # Save these options for future use
+          echo "SSH_USE_INSECURE=true" >> $GITHUB_ENV
+          exit 0
+        fi
+        
+        # If still failing, this is a critical issue
+        echo "❌ All SSH connection attempts failed."
+        echo "Please verify that the SSH key is correctly registered with DigitalOcean."
+        echo "You may need to run the fix_ssh_auth.sh script manually or recreate the droplet."
+        
         
     # Add the SSH key directly to the droplet
     - name: Add SSH Key to Droplet
       run: |
         DROPLET_IP="${{ steps.terraform_apply.outputs.ip }}"
         echo "Adding SSH key directly to droplet at $DROPLET_IP..."
-        # Make the script executable
-        chmod +x ./scripts/add_ssh_key_to_droplet.sh
-        # Run the script with the extracted public key
-        if ! ./scripts/add_ssh_key_to_droplet.sh "${{ secrets.DIGITALOCEAN_TOKEN }}" "$DROPLET_IP" ~/.ssh/do_key.pub; then
-          echo "Failed to add SSH key to droplet. Attempting alternative method..."
-          # Get the droplet ID from the API
+        
+        # Check if we have a valid public key extracted
+        if [[ -z "${{ env.EXTRACTED_PUBKEY }}" || "${{ env.EXTRACTED_PUBKEY }}" == *"Failed to extract"* ]]; then
+          echo "Error: No valid public key available from the private key."
+          echo "Attempting to generate a new key pair for deployment..."
+          
+          # Generate a new key pair for deployment
+          ssh-keygen -t rsa -b 4096 -f ~/.ssh/new_deploy_key -N "" -q
+          chmod 600 ~/.ssh/new_deploy_key
+          NEW_PUBKEY=$(cat ~/.ssh/new_deploy_key.pub)
+          
+          # Save the new private key for later use
+          echo "NEW_PRIVATE_KEY<<EOF" >> $GITHUB_ENV
+          cat ~/.ssh/new_deploy_key >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+          echo "Using newly generated public key for deployment."
+          USE_KEY="~/.ssh/new_deploy_key.pub"
+          PUBKEY="$NEW_PUBKEY"
+        else
+          echo "Using extracted public key from GitHub secret."
+          echo "${{ env.EXTRACTED_PUBKEY }}" > ~/.ssh/do_key.pub
+          chmod 644 ~/.ssh/do_key.pub
+          USE_KEY="~/.ssh/do_key.pub"
+          PUBKEY="${{ env.EXTRACTED_PUBKEY }}"
+        fi
+        
+        # Get the droplet ID from the API
+        echo "Getting droplet ID for $DROPLET_IP..."
+        DROPLET_ID=$(curl -s -X GET \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+          "https://api.digitalocean.com/v2/droplets?per_page=200" | \
+          grep -o '"id":[0-9]*,"name":"[^"]*","memory":[0-9]*,"vcpus":[0-9]*,"disk":[0-9]*,"locked":\w*,"status":"active","kernel":null,"created_at":"[^"]*","features":\[[^]]*\],"backup_ids":\[\],"next_backup_window":null,"snapshot_ids":\[\],"image":{[^}]*},"volume_ids":\[\],"size":{[^}]*},"size_slug":"[^"]*","networks":{"v4":\[{"ip_address":"'"$DROPLET_IP"'"' | \
+          grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        
+        if [ -z "$DROPLET_ID" ]; then
+          echo "Failed to get droplet ID. Trying alternative method..."
           DROPLET_ID=$(curl -s -X GET \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
             "https://api.digitalocean.com/v2/droplets?name=bn-trading-server" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-          # Try a direct SSH command using the DigitalOcean console-access API
-          curl -s -X POST \
+            
+          if [ -z "$DROPLET_ID" ]; then
+            echo "Error: Could not find droplet ID. API response:"
+            curl -s -X GET \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+              "https://api.digitalocean.com/v2/droplets?name=bn-trading-server"
+            exit 1
+          fi
+        fi
+        
+        echo "Found droplet ID: $DROPLET_ID"
+        
+        # Use console API to add the key directly
+        echo "Adding key via console API..."
+        CONSOLE_COMMAND="mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$PUBKEY' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && cat ~/.ssh/authorized_keys && echo 'Key added successfully' && systemctl restart sshd"
+        
+        CONSOLE_RESPONSE=$(curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+          -d "{\"type\":\"console\", \"command\":\"$CONSOLE_COMMAND\"}" \
+          "https://api.digitalocean.com/v2/droplets/$DROPLET_ID/actions")
+        
+        echo "Console API response: $CONSOLE_RESPONSE"
+        
+        # Extract action ID and check status
+        ACTION_ID=$(echo "$CONSOLE_RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        if [ -n "$ACTION_ID" ]; then
+          echo "Console action initiated with ID: $ACTION_ID. Waiting for completion..."
+          
+          # Optional: Poll for action completion
+          sleep 10
+          ACTION_STATUS=$(curl -s -X GET \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
-            -d "{\"type\":\"console\", \"command\":\"echo '$EXTRACTED_PUBKEY' >> ~/.ssh/authorized_keys\"}" \
-            "https://api.digitalocean.com/v2/droplets/$DROPLET_ID/actions"
+            "https://api.digitalocean.com/v2/actions/$ACTION_ID" | grep -o '"status":"[^"]*"' | cut -d':' -f2 | tr -d '"')
+          
+          echo "Action status: $ACTION_STATUS"
+        else
+          echo "Failed to initiate console action"
         fi
+        
         # Wait for the key to be active
-        echo "Waiting 15 seconds for the key to be active..."
-        sleep 15
+        echo "Waiting 20 seconds for the key to be active..."
+        sleep 20
+        
+        # Test the SSH connection
+        echo "Testing SSH connection with the key..."
+        if [ -n "$NEW_PUBKEY" ]; then
+          # We generated a new key, use that for testing
+          if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/new_deploy_key root@$DROPLET_IP 'echo "SSH connection successful!"'; then
+            echo "✅ SSH connection established successfully with new key!"
+            # Use the new key for deployment
+            echo "Using new key for deployment"
+            echo "${{ env.NEW_PRIVATE_KEY }}" > ~/.ssh/do_key
+            chmod 600 ~/.ssh/do_key
+          else
+            echo "❌ SSH connection test failed with new key. Trying again with original key..."
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/do_key root@$DROPLET_IP 'echo "SSH connection successful!"' || echo "Both keys failed. Further debugging required."
+          fi
+        else
+          # Test with original key
+          if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/do_key root@$DROPLET_IP 'echo "SSH connection successful!"'; then
+            echo "✅ SSH connection established successfully!"
+          else
+            echo "❌ SSH connection test failed. Further debugging may be required."
+          fi
+        fi
     
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master
       with:
         host: ${{ steps.terraform_apply.outputs.ip }}
         username: root
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        # Use NEW_PRIVATE_KEY if it exists, otherwise fall back to SSH_PRIVATE_KEY
+        key: ${{ env.NEW_PRIVATE_KEY != '' && env.NEW_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY }}
         port: 22
         timeout: 120s
         command_timeout: 20m
-        use_insecure_cipher: true  # Try this if regular connection fails
+        use_insecure_cipher: ${{ env.SSH_USE_INSECURE == 'true' }}  # Dynamically set based on successful connection method
         debug: true   # Enable debug mode to see detailed logs
         script: |
           echo "Connected to droplet - Setting up application..."
@@ -259,3 +488,40 @@ jobs:
           # Verify the containers are running
           echo "Verifying deployment..."
           docker ps
+
+    - name: Verify Deployment
+      run: |
+        DROPLET_IP="${{ steps.terraform_apply.outputs.ip }}"
+        echo "Verifying deployment on $DROPLET_IP..."
+        
+        # Wait for services to start
+        echo "Waiting 30 seconds for services to start..."
+        sleep 30
+        
+        # Check if application is responding
+        echo "Checking if application is responding..."
+        RETRY_COUNT=0
+        MAX_RETRIES=5
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          echo "Attempt $((RETRY_COUNT+1))/$MAX_RETRIES: Checking application status..."
+          
+          if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/do_key root@$DROPLET_IP 'docker ps | grep -q bank-nifty-trading'; then
+            echo "✅ Application is running successfully!"
+            
+            # Save deployment info for reference
+            echo "DEPLOY_SUCCESS=true" >> $GITHUB_ENV
+            echo "DEPLOY_IP=$DROPLET_IP" >> $GITHUB_ENV
+            echo "DEPLOY_TIME=$(date)" >> $GITHUB_ENV
+            
+            exit 0
+          else
+            echo "Application not fully running yet. Waiting..."
+            sleep 20
+            RETRY_COUNT=$((RETRY_COUNT+1))
+          fi
+        done
+        
+        echo "❌ Deployment verification failed. Check logs for details."
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/do_key root@$DROPLET_IP 'docker ps; docker logs $(docker ps -q --filter "name=bank-nifty")'
+        echo "DEPLOY_SUCCESS=false" >> $GITHUB_ENV
