@@ -78,3 +78,41 @@ numpy==1.20.3
 scikit-learn==0.24.2
 upstox-python-api==2.0.0
 ```
+
+---
+
+## [2025-05-16] Docker Setup
+
+**Commit:** chore: add Dockerfile and docker-compose  
+**Files:**  
+- `Dockerfile`
+- `docker-compose.yml`
+
+**Snippets:**  
+```dockerfile
+# Dockerfile
+FROM python:3.9-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/ src/
+
+EXPOSE 5000
+```
+
+```yaml
+# docker-compose.yml
+version: '3'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=postgresql://user:password@db:5432/bn_trading
+```
