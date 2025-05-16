@@ -20,17 +20,13 @@ resource "digitalocean_droplet" "bn_trading" {
   ssh_keys = var.ssh_key_ids
 }
 
-# Make floating IP optional by using 'count'
-resource "digitalocean_floating_ip" "bn_trading_ip" {
-  count      = var.use_floating_ip ? 1 : 0
-  droplet_id = digitalocean_droplet.bn_trading.id
-  region     = digitalocean_droplet.bn_trading.region
-}
+# We're not using floating IPs due to account limits
+# If you need to use an existing floating IP, you can uncomment and modify this section
+# resource "digitalocean_floating_ip_assignment" "bn_trading_ip_assignment" {
+#   ip_address = "your-existing-floating-ip"
+#   droplet_id = digitalocean_droplet.bn_trading.id
+# }
 
 output "droplet_ip" {
   value = digitalocean_droplet.bn_trading.ipv4_address
-}
-
-output "floating_ip" {
-  value = var.use_floating_ip && length(digitalocean_floating_ip.bn_trading_ip) > 0 ? digitalocean_floating_ip.bn_trading_ip[0].ip_address : "No floating IP created"
 }
