@@ -8,6 +8,7 @@ terraform {
 }
 
 provider "digitalocean" {
+  # The provider will use the DIGITALOCEAN_TOKEN environment variable if token is not specified
   token = var.digitalocean_token
 }
 

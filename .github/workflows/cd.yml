@@ -38,6 +38,7 @@ jobs:
         terraform init
       env:
         DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+        TF_VAR_digitalocean_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
     
     - name: Terraform Apply
       run: |
@@ -45,6 +46,7 @@ jobs:
         terraform apply -auto-approve
       env:
         DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+        TF_VAR_digitalocean_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
     
     - name: Get Droplet IP
       id: droplet-ip
