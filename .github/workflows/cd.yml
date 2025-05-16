@@ -40,77 +40,54 @@ jobs:
         DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
         TF_VAR_digitalocean_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
     
-    - name: Terraform Apply
+    - name: Terraform Apply and Get IP
+      id: terraform_apply
       run: |
         cd infra
-        terraform apply -auto-approve
+        # Run terraform apply and capture all output
+        APPLY_OUTPUT=$(terraform apply -auto-approve)
+        echo "Full Terraform apply output:"
+        echo "$APPLY_OUTPUT"
+        
+        # Extract the IP directly from the apply output
+        DROPLET_IP=$(echo "$APPLY_OUTPUT" | grep -Eo 'droplet_ip = "([0-9]{1,3}\.){3}[0-9]{1,3}"' | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
+        
+        if [[ -n "$DROPLET_IP" && "$DROPLET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Successfully extracted IP from apply output: $DROPLET_IP"
+          echo "ip=$DROPLET_IP" >> $GITHUB_OUTPUT
+        else
+          echo "Failed to extract IP from apply output."
+          # Let's check the state directly to see what's there
+          echo "Listing available resources in state:"
+          terraform state list || echo "No state found"
+          
+          # Try to get the IP directly from the API using the DigitalOcean CLI
+          echo "Attempting to use doctl to get the droplet IP..."
+          curl -s -X GET \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+            "https://api.digitalocean.com/v2/droplets?name=bn-trading-server" > droplets.json
+          
+          # Extract the IP from the API response
+          API_IP=$(cat droplets.json | grep -Eo '"ip_address":"([0-9]{1,3}\.){3}[0-9]{1,3}"' | head -1 | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
+          
+          if [[ -n "$API_IP" && "$API_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Successfully extracted IP from API: $API_IP"
+            echo "ip=$API_IP" >> $GITHUB_OUTPUT
+          else
+            echo "All attempts to get droplet IP failed. API response:"
+            cat droplets.json
+            exit 1
+          fi
+        fi
       env:
         DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
         TF_VAR_digitalocean_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
     
-    - name: Get Droplet IP
-      id: droplet-ip
-      run: |
-        cd infra
-        # Create a temporary output.tf file to ensure we get clean output
-        cat > output_ip.tf << EOF
-        output "clean_ip" {
-          value = digitalocean_droplet.bn_trading.ipv4_address
-          description = "The IPv4 address of the droplet"
-        }
-        EOF
-        
-        # Make sure everything is initialized with the new output
-        terraform init
-        
-        # First try the most direct method - terraform state show
-        echo "Trying terraform state show method..."
-        DROPLET_IP=$(terraform state show digitalocean_droplet.bn_trading | grep -A2 'ipv4_address' | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
-        
-        # Verify we have a valid IP
-        if [[ -n "$DROPLET_IP" && "$DROPLET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Successfully extracted IP with terraform state show: $DROPLET_IP"
-        else
-          # Fallback to our custom output variable which should be cleaner
-          echo "State show method failed, trying custom output method..."
-          DROPLET_IP=$(terraform output -raw clean_ip)
-          
-          # If that still fails, try the multiple extraction methods
-          if [[ ! "$DROPLET_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Custom output method failed too. Raw output was:"
-            echo "$DROPLET_IP"
-            echo "Falling back to regex extraction methods..."
-            
-            # Save terraform output to a file
-            terraform output -raw droplet_ip > /tmp/ip.txt
-            
-            # Try multiple extraction methods
-            IP_GREP=$(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' /tmp/ip.txt || echo "")
-            IP_AWK=$(awk -F'::' '{print $1}' /tmp/ip.txt || echo "")
-            
-            if [[ -n "$IP_AWK" && "$IP_AWK" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              DROPLET_IP="$IP_AWK"
-              echo "Using awk-extracted IP: $DROPLET_IP"
-            elif [[ -n "$IP_GREP" && "$IP_GREP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              DROPLET_IP="$IP_GREP"
-              echo "Using grep-extracted IP: $DROPLET_IP"
-            else
-              echo "Error: All extraction methods failed. Cannot proceed without valid IP."
-              echo "Contents of /tmp/ip.txt:"
-              cat /tmp/ip.txt
-              exit 1
-            fi
-          fi
-        fi
-        
-        # Write to GitHub output
-        echo "ip=$DROPLET_IP" >> $GITHUB_OUTPUT
-        echo "Final extracted droplet IP: $DROPLET_IP"
-    
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master
       with:
-        host: ${{ steps.droplet-ip.outputs.ip }}
+        host: ${{ steps.terraform_apply.outputs.ip }}
         username: root
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
