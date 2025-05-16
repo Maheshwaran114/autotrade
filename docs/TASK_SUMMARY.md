@@ -200,3 +200,36 @@ def test_hello_endpoint(client):
     """Test the hello endpoint returns the correct message"""
     response = client.get('/')
 ```
+
+---
+
+## [2025-05-16] CD Pipeline
+
+**Commit:** ci: add GitHub Actions CD workflow  
+**Files:**  
+- `.github/workflows/cd.yml`  
+
+**Snippets:**  
+```yaml
+# .github/workflows/cd.yml
+name: CD
+
+on:
+  push:
+    branches: [ main, preprod ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Set environment variables based on branch
+      run: |
+        if [[ $GITHUB_REF == refs/heads/main ]]; then
+          echo "ENVIRONMENT=prod" >> $GITHUB_ENV
+        elif [[ $GITHUB_REF == refs/heads/preprod ]]; then
+          echo "ENVIRONMENT=preprod" >> $GITHUB_ENV
+        fi
+```
