@@ -50,7 +50,7 @@ jobs:
       id: droplet-ip
       run: |
         cd infra
-        echo "::set-output name=ip::$(terraform output -raw floating_ip)"
+        echo "ip=$(terraform output -raw floating_ip)" >> $GITHUB_OUTPUT
     
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master
