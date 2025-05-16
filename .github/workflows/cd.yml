@@ -52,12 +52,21 @@ jobs:
       id: droplet-ip
       run: |
         cd infra
-        # Capture the output and strip any debug info by storing in a variable and only using that
-        DROPLET_IP=$(terraform output -raw droplet_ip | tr -d '\n')
+        # Use a different approach to extract just the IP address
+        # Extract the IP address using a pattern match to ensure only the IP is captured
+        terraform output -raw droplet_ip > /tmp/ip.txt
+        # Use grep to extract just the IP address pattern (IPv4 format)
+        DROPLET_IP=$(grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' /tmp/ip.txt)
+        # Verify we have a valid IP
+        if [[ ! $DROPLET_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Error: Failed to extract a valid IP address"
+          cat /tmp/ip.txt
+          exit 1
+        fi
         # Write to GitHub output with proper escaping
-        echo "ip=${DROPLET_IP}" >> $GITHUB_OUTPUT
+        echo "ip=$DROPLET_IP" >> $GITHUB_OUTPUT
         # Display for debugging
-        echo "Using droplet IP: ${DROPLET_IP}"
+        echo "Using droplet IP: $DROPLET_IP"
     
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master
