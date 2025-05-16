@@ -52,7 +52,13 @@ jobs:
       id: droplet-ip
       run: |
         cd infra
-        echo "ip=$(terraform output -raw floating_ip)" >> $GITHUB_OUTPUT
+        # Try to get floating IP first, if it fails, use the droplet IP
+        FLOATING_IP=$(terraform output -raw floating_ip 2>/dev/null || echo "")
+        if [[ "$FLOATING_IP" == "No floating IP created" ]] || [[ -z "$FLOATING_IP" ]]; then
+          echo "ip=$(terraform output -raw droplet_ip)" >> $GITHUB_OUTPUT
+        else
+          echo "ip=$FLOATING_IP" >> $GITHUB_OUTPUT
+        fi
     
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master

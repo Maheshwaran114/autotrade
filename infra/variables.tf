@@ -9,3 +9,9 @@ variable "ssh_key_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "use_floating_ip" {
+  description = "Whether to create and use a floating IP"
+  type        = bool
+  default     = false
+}
