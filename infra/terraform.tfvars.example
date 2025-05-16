@@ -1,5 +1,0 @@
-# Example terraform.tfvars file
-# Copy this file to terraform.tfvars and fill in your values
-
-digitalocean_token = "your_digitalocean_api_token"
-ssh_key_fingerprints = ["xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx"]  # Your DigitalOcean SSH key fingerprints
