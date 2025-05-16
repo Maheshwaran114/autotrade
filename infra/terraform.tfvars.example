@@ -3,3 +3,4 @@
 
 digitalocean_token = "your_digitalocean_api_token"
 ssh_key_ids = ["12345678", "87654321"]  # Your DigitalOcean SSH key IDs
+use_floating_ip = false  # Set to true if you want to use a floating IP and have available quota
