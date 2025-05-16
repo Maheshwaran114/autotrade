@@ -9,8 +9,4 @@ COPY src/ src/
 
 EXPOSE 5000
 
-# Run as non-root user for better security
-RUN useradd -m appuser
-USER appuser
-
 CMD ["python", "src/app.py"]

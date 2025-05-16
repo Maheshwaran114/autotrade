@@ -116,3 +116,40 @@ services:
       - FLASK_ENV=development
       - DATABASE_URL=postgresql://user:password@db:5432/bn_trading
 ```
+
+---
+
+## [2025-05-16] Terraform Infrastructure (DigitalOcean)
+
+**Commit:** chore(infra): add Terraform DigitalOcean droplet  
+**Files:**  
+- `infra/main.tf`  
+- `infra/variables.tf`  
+- `infra/terraform.tfvars.example`  
+- `infra/dev.tfvars`  
+- `infra/preprod.tfvars`  
+- `infra/prod.tfvars`  
+
+**Snippets:**  
+```terraform
+# infra/main.tf
+provider "digitalocean" {
+  token = var.digitalocean_token
+}
+
+resource "digitalocean_droplet" "bn_trading" {
+  image  = "docker-20-04"
+  name   = "bn-trading-${var.environment}"
+  region = var.region
+  size   = "s-2vcpu-4gb"
+  ssh_keys = var.ssh_key_ids
+```
+
+```terraform
+# infra/variables.tf
+variable "digitalocean_token" {
+  description = "DigitalOcean API token"
+  type        = string
+  sensitive   = true
+}
+```
