@@ -52,10 +52,12 @@ jobs:
       id: droplet-ip
       run: |
         cd infra
-        # Try to get the droplet IP directly, it's more reliable since we disabled floating IP
-        DROPLET_IP=$(terraform output -raw droplet_ip)
-        echo "ip=$DROPLET_IP" >> $GITHUB_OUTPUT
-        echo "Using droplet IP: $DROPLET_IP"
+        # Capture the output and strip any debug info by storing in a variable and only using that
+        DROPLET_IP=$(terraform output -raw droplet_ip | tr -d '\n')
+        # Write to GitHub output with proper escaping
+        echo "ip=${DROPLET_IP}" >> $GITHUB_OUTPUT
+        # Display for debugging
+        echo "Using droplet IP: ${DROPLET_IP}"
     
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master
