@@ -48,3 +48,33 @@ A system for automated trading of Bank Nifty options.
   - `FLASK_ENV=development`
   - `DATABASE_URL=sqlite:///dev.db`
 ```
+
+---
+
+## [2025-05-16] Placeholder Application
+
+**Commit:** feat: add placeholder app and dependencies  
+**Files:**  
+- `src/app.py`  
+- `requirements.txt`  
+
+**Snippets:**  
+```python
+# src/app.py
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return jsonify({"message": "Hello, Bank Nifty Trading System"})
+```
+
+```
+# requirements.txt
+flask==2.0.1
+pandas==1.3.0
+numpy==1.20.3
+scikit-learn==0.24.2
+upstox-python-api==2.0.0
+```
