@@ -156,9 +156,38 @@ jobs:
         echo "Attempting verbose SSH connection with alternative options..."
         ssh -v -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o PubkeyAuthentication=yes -o PreferredAuthentications=publickey -i ~/.ssh/do_key root@$DROPLET_IP 'echo SSH Connection Test' || echo "Direct SSH test failed"
         
-        # Clean up temporary key file
-        rm -f ~/.ssh/do_key
+        # Generate public key file for adding to droplet
+        if [ -n "$EXTRACTED_PUBKEY" ]; then
+          echo "$EXTRACTED_PUBKEY" > ~/.ssh/do_key.pub
+          echo "Successfully created public key file from private key"
+        fi
         
+    # Add the SSH key directly to the droplet
+    - name: Add SSH Key to Droplet
+      run: |
+        DROPLET_IP="${{ steps.terraform_apply.outputs.ip }}"
+        echo "Adding SSH key directly to droplet at $DROPLET_IP..."
+        # Make the script executable
+        chmod +x ./scripts/add_ssh_key_to_droplet.sh
+        # Run the script with the extracted public key
+        if ! ./scripts/add_ssh_key_to_droplet.sh "${{ secrets.DIGITALOCEAN_TOKEN }}" "$DROPLET_IP" ~/.ssh/do_key.pub; then
+          echo "Failed to add SSH key to droplet. Attempting alternative method..."
+          # Get the droplet ID from the API
+          DROPLET_ID=$(curl -s -X GET \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+            "https://api.digitalocean.com/v2/droplets?name=bn-trading-server" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+          # Try a direct SSH command using the DigitalOcean console-access API
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_TOKEN }}" \
+            -d "{\"type\":\"console\", \"command\":\"echo '$EXTRACTED_PUBKEY' >> ~/.ssh/authorized_keys\"}" \
+            "https://api.digitalocean.com/v2/droplets/$DROPLET_ID/actions"
+        fi
+        # Wait for the key to be active
+        echo "Waiting 15 seconds for the key to be active..."
+        sleep 15
+    
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master
       with:
@@ -172,64 +201,6 @@ jobs:
         debug: true   # Enable debug mode to see detailed logs
         script: |
           echo "Connected to droplet - Setting up application..."
-          
-          # Check if docker is installed and running
-          if ! command -v docker &> /dev/null; then
-            echo "Docker not found. Installing Docker..."
-            apt-get update
-            apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-            add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-            apt-get update
-            apt-get install -y docker-ce docker-compose
-          fi
-          
-          # Verify Docker is running
-          systemctl start docker
-          systemctl enable docker
-          docker --version
-          
-          # Pull the latest image
-          echo "Pulling latest Docker image..."
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/bank-nifty-trading:latest
-          
-          # Create a directory for the application if it doesn't exist
-          mkdir -p /opt/bank-nifty-trading
-          cd /opt/bank-nifty-trading
-          
-          # Create a simple docker-compose file if it doesn't exist
-          if [ ! -f docker-compose.yml ]; then
-            echo "Creating docker-compose.yml file..."
-            cat > docker-compose.yml << 'EOF'
-            version: '3'
-            services:
-              app:
-                image: ${{ secrets.DOCKERHUB_USERNAME }}/bank-nifty-trading:latest
-                ports:
-                  - "5000:5000"
-                restart: always
-              db:
-                image: postgres:13
-                environment:
-                  POSTGRES_PASSWORD: postgres
-                  POSTGRES_USER: postgres
-                  POSTGRES_DB: trading
-                volumes:
-                  - pgdata:/var/lib/postgresql/data
-                restart: always
-            volumes:
-              pgdata:
-            EOF
-          fi
-          
-          # Start the application
-          echo "Starting the application..."
-          docker-compose down || true
-          docker-compose up -d
-          
-          # Verify the containers are running
-          echo "Verifying deployment..."
-          docker ps
           
           # Check if docker is installed and running
           if ! command -v docker &> /dev/null; then

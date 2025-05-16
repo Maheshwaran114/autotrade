@@ -50,6 +50,12 @@ log/
 ehthumbs.db
 Thumbs.db
 
+# SSH Keys
+*_key
+*_key.pub
+scripts/do_deployment_key
+scripts/do_deployment_key.pub
+
 # Terraform
 .terraform/
 *.tfstate
