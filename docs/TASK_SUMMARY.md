@@ -153,3 +153,50 @@ variable "digitalocean_token" {
   sensitive   = true
 }
 ```
+
+---
+
+## [2025-05-16] CI Pipeline
+
+**Commit:** ci: add GitHub Actions CI workflow  
+**Files:**  
+- `.github/workflows/ci.yml`  
+- `tests/test_app.py`  
+- `tests/__init__.py`  
+
+**Snippets:**  
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  pull_request:
+    branches: [ main, preprod ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+```
+
+```python
+# tests/test_app.py
+import pytest
+from src.app import app
+
+@pytest.fixture
+def client():
+    with app.test_client() as client:
+        yield client
+
+def test_hello_endpoint(client):
+    """Test the hello endpoint returns the correct message"""
+    response = client.get('/')
+```
