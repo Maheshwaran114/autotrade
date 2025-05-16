@@ -84,13 +84,171 @@ jobs:
         DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
         TF_VAR_digitalocean_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
     
+    - name: Wait for SSH to become available
+      run: |
+        # Get the IP address from previous step output
+        DROPLET_IP="${{ steps.terraform_apply.outputs.ip }}"
+        echo "Waiting for SSH on $DROPLET_IP to become available..."
+        
+        # Give the droplet some time to initialize (initial delay)
+        echo "Initial wait for 60 seconds to allow droplet to boot up..."
+        sleep 60
+        
+        # Try to connect to SSH with retry
+        MAX_RETRIES=10
+        RETRY_DELAY=30
+        RETRY_COUNT=0
+        SSH_READY=false
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          echo "Attempt $((RETRY_COUNT+1))/$MAX_RETRIES: Checking SSH connection..."
+          
+          # Use nc (netcat) to check if SSH port is open
+          if nc -z -w 5 $DROPLET_IP 22; then
+            echo "SSH is now available!"
+            SSH_READY=true
+            break
+          else
+            echo "SSH not yet available. Waiting for $RETRY_DELAY seconds before next attempt..."
+            sleep $RETRY_DELAY
+            RETRY_COUNT=$((RETRY_COUNT+1))
+          fi
+        done
+        
+        if [ "$SSH_READY" != "true" ]; then
+          echo "Failed to connect to SSH after $MAX_RETRIES attempts."
+          echo "Here's some diagnostic information:"
+          echo "Checking if droplet is reachable via ping:"
+          ping -c 3 $DROPLET_IP || echo "Ping failed"
+          echo "Checking if other ports are reachable:"
+          nc -z -v -w 5 $DROPLET_IP 80 || echo "Port 80 closed"
+          exit 1
+        fi
+    
     - name: Deploy to Droplet
       uses: appleboy/ssh-action@master
       with:
         host: ${{ steps.terraform_apply.outputs.ip }}
         username: root
         key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: 22
+        timeout: 60s
+        command_timeout: 20m
         script: |
+          echo "Connected to droplet - Setting up application..."
+          
+          # Check if docker is installed and running
+          if ! command -v docker &> /dev/null; then
+            echo "Docker not found. Installing Docker..."
+            apt-get update
+            apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+            add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+            apt-get update
+            apt-get install -y docker-ce docker-compose
+          fi
+          
+          # Verify Docker is running
+          systemctl start docker
+          systemctl enable docker
+          docker --version
+          
+          # Pull the latest image
+          echo "Pulling latest Docker image..."
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/bank-nifty-trading:latest
-          docker-compose down
+          
+          # Create a directory for the application if it doesn't exist
+          mkdir -p /opt/bank-nifty-trading
+          cd /opt/bank-nifty-trading
+          
+          # Create a simple docker-compose file if it doesn't exist
+          if [ ! -f docker-compose.yml ]; then
+            echo "Creating docker-compose.yml file..."
+            cat > docker-compose.yml << 'EOF'
+            version: '3'
+            services:
+              app:
+                image: ${{ secrets.DOCKERHUB_USERNAME }}/bank-nifty-trading:latest
+                ports:
+                  - "5000:5000"
+                restart: always
+              db:
+                image: postgres:13
+                environment:
+                  POSTGRES_PASSWORD: postgres
+                  POSTGRES_USER: postgres
+                  POSTGRES_DB: trading
+                volumes:
+                  - pgdata:/var/lib/postgresql/data
+                restart: always
+            volumes:
+              pgdata:
+            EOF
+          fi
+          
+          # Start the application
+          echo "Starting the application..."
+          docker-compose down || true
           docker-compose up -d
+          
+          # Verify the containers are running
+          echo "Verifying deployment..."
+          docker ps
+          
+          # Check if docker is installed and running
+          if ! command -v docker &> /dev/null; then
+            echo "Docker not found. Installing Docker..."
+            apt-get update
+            apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+            add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+            apt-get update
+            apt-get install -y docker-ce docker-compose
+          fi
+          
+          # Verify Docker is running
+          systemctl start docker
+          systemctl enable docker
+          docker --version
+          
+          # Pull the latest image
+          echo "Pulling latest Docker image..."
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/bank-nifty-trading:latest
+          
+          # Create a directory for the application if it doesn't exist
+          mkdir -p /opt/bank-nifty-trading
+          cd /opt/bank-nifty-trading
+          
+          # Create a simple docker-compose file if it doesn't exist
+          if [ ! -f docker-compose.yml ]; then
+            echo "Creating docker-compose.yml file..."
+            cat > docker-compose.yml << 'EOF'
+            version: '3'
+            services:
+              app:
+                image: ${{ secrets.DOCKERHUB_USERNAME }}/bank-nifty-trading:latest
+                ports:
+                  - "5000:5000"
+                restart: always
+              db:
+                image: postgres:13
+                environment:
+                  POSTGRES_PASSWORD: postgres
+                  POSTGRES_USER: postgres
+                  POSTGRES_DB: trading
+                volumes:
+                  - pgdata:/var/lib/postgresql/data
+                restart: always
+            volumes:
+              pgdata:
+            EOF
+          fi
+          
+          # Start the application
+          echo "Starting the application..."
+          docker-compose down || true
+          docker-compose up -d
+          
+          # Verify the containers are running
+          echo "Verifying deployment..."
+          docker ps
