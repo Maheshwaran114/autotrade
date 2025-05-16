@@ -99,6 +99,46 @@ services:
 
 ---
 
+## [2025-05-16] GitHub Actions SSH Authentication Fix
+
+**Commit:** fix: SSH authentication issues in GitHub Actions workflow  
+**Files:**  
+- `.github/workflows/cd.yml` (updated)
+- `docs/DEPLOYMENT_GUIDE.md` (created)
+- `docs/SSH_FIX_SUMMARY.md` (created)
+- `scripts/test_ssh_connection.sh` (created)
+- `scripts/update_github_actions.sh` (created)
+- `scripts/fix_ssh_auth.sh` (created)
+- `infra/terraform.tfvars` (updated)
+
+**Summary:**
+Successfully fixed SSH authentication issues in the GitHub Actions workflow that prevented deployments to the DigitalOcean droplet. The solution included:
+
+1. **Root Cause Analysis**:
+   - Identified that the SSH key was not properly registered with the DigitalOcean droplet
+   - Found issues with the workflow's SSH key handling
+
+2. **Infrastructure Changes**:
+   - Updated `terraform.tfvars` to include multiple SSH key fingerprints
+   - Created a new droplet with IP 165.22.214.71 with all SSH keys properly configured
+
+3. **Workflow Improvements**:
+   - Enhanced the GitHub Actions workflow with improved SSH key handling
+   - Added a step to register SSH keys with DigitalOcean before Terraform execution
+   - Implemented fallback key generation when the primary key fails
+   - Added dynamic configuration of SSH cipher options
+
+4. **Documentation and Scripts**:
+   - Created comprehensive scripts for testing and maintaining SSH connectivity
+   - Added detailed deployment documentation
+
+**Validation:**
+- SSH connectivity to the new droplet (165.22.214.71) has been verified
+- GitHub Actions workflow updates have been tested and pushed
+- All tokens and secrets have been secured properly
+
+---
+
 ## [2025-05-16] Terraform Infrastructure
 
 **Commit:** chore(infra): add Terraform DigitalOcean droplet  
