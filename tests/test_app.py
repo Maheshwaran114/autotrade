@@ -1,6 +1,5 @@
 import sys
 import os
-import json
 
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -19,6 +18,6 @@ def test_health_check():
     client = app.test_client()
     response = client.get('/health')
     assert response.status_code == 200
-    data = json.loads(response.data)
+    data = response.get_json()
     assert data["status"] == "healthy"
     assert data["service"] == "bank-nifty-trading-system"
