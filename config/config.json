@@ -1,0 +1,35 @@
+{
+    "api_key": "DEMO_API_KEY",
+    "model_path": "models/day_classifier.pkl",
+    "strategy": "delta_theta",
+    
+    "delta_theta_settings": {
+        "max_position_size": 10,
+        "target_delta": 0.0,
+        "delta_tolerance": 0.1,
+        "max_vega": 100.0,
+        "min_theta": 50.0
+    },
+    
+    "gamma_scalping_settings": {
+        "rehedge_threshold": 50,
+        "max_position_size": 5,
+        "target_gamma": 0.5,
+        "max_vega_exposure": 200,
+        "hedge_ratio": 0.8
+    },
+    
+    "broker_config": {
+        "broker": "zerodha",
+        "api_key": "DEMO_BROKER_API_KEY",
+        "api_secret": "DEMO_BROKER_API_SECRET",
+        "user_id": "DEMO_USER_ID",
+        "product_type": "MIS"
+    },
+    
+    "logging": {
+        "level": "INFO",
+        "file_path": "logs/trading_system.log",
+        "console": true
+    }
+}
