@@ -29,9 +29,6 @@ ENV/
 env.bak/
 venv.bak/
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
 # IDE specific files
 .idea/
 .vscode/
@@ -40,40 +37,45 @@ venv.bak/
 .DS_Store
 
 # Logs
-logs/
 *.log
-log/
 
 # Docker
-Dockerfile.bak
-docker-compose.override.yml
-.dockerignore
+Dockerfile
+docker-compose*.yml
 
-# Local configuration
-instance/
-.webassets-cache
-.env
-.flaskenv
+# Terraform and Infrastructure
+*.tfstate
+*.tfvars
+infra/variables.tf
 
-# Trading specific
-credentials.json
-api_keys.json
-*.key
-*.pem
-*.secret
-secrets/
+# GitHub Actions
+.github/
 
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
-.nox/
-coverage.xml
-*.cover
-.hypothesis/
+# Additional deployment files
+DEPLOYMENT*.md
+ENVIRONMENT_*.md
+QUICK_START.md
+WORKFLOW.md
+example.env
+package.json
 
-# Temporary files
-.temp/
-tmp/
-temp/
+# Extra documentation files
+docs/CD_*.md
+docs/CI_*.md
+docs/DEPLOYMENT_*.md
+docs/SSH_*.md
+docs/TASK_*.md
+docs/TERRAFORM_*.md
+docs/TOKEN_*.md
+
+# Script files (except originals)
+scripts/*.sh
+!scripts/clean_ssh_setup.sh
+!scripts/test_ssh.sh
+
+# Extra source files
+src/app.py
+src/db.js
+src/index.js
+src/routes.js
+
