@@ -79,3 +79,11 @@ src/db.js
 src/index.js
 src/routes.js
 
+# Sensitive configuration files
+config/credentials.json
+config/token_history.json
+
+# Raw data files (too large for git)
+data/raw/
+data/processed/*.parquet
+
