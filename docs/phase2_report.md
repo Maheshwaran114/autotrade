@@ -565,3 +565,50 @@ The `labeled_days.parquet` file contains 24 columns:
 **Status**: ✅ COMPLETED - Ready for Phase 3 model training and strategy development
 
 Generated on: 2025-05-27 (Document cleaned and updated)
+
+
+## 2.3 Feature Engineering
+- **Features saved**: `data/processed/features.pkl` (37×12)
+- **Labels saved**: `data/processed/labels.pkl` (37)
+- **Feature columns**: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
+- **Label distribution**: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+
+### Sample Features:
+```
+                            gap_pct  or_width  ...    atm_iv  volume_ratio
+date                                           ...                        
+2025-03-27 00:00:00+05:30  0.000000  0.009176  ...  0.138700      1.000000
+2025-03-28 00:00:00+05:30  0.001444  0.006940  ...  0.140525      0.953164
+2025-04-01 00:00:00+05:30 -0.006997  0.010094  ...  0.143442      2.005598
+2025-04-02 00:00:00+05:30  0.002279  0.006471  ...  0.136468      0.586932
+2025-04-03 00:00:00+05:30 -0.009008  0.009561  ...  0.139002      0.556373
+
+[5 rows x 12 columns]
+```
+
+### Sample Labels:
+```
+date
+2025-03-27 00:00:00+05:30    MildBias
+2025-03-28 00:00:00+05:30    MildBias
+2025-04-01 00:00:00+05:30       Trend
+2025-04-02 00:00:00+05:30       Trend
+2025-04-03 00:00:00+05:30    MildBias
+Name: regime, dtype: object
+```
+
+### Feature Descriptions:
+1. **gap_pct**: Gap percentage from previous close
+2. **or_width**: Opening range width (normalized)
+3. **intraday_volatility**: Realized intraday volatility
+4. **iv_pct**: Implied volatility percentile
+5. **iv_change**: IV change from previous day
+6. **sector_strength**: Volume ratio proxy for sector strength
+7. **daily_return**: Daily return percentage
+8. **price_range**: High-low range
+9. **body_size**: Candle body size
+10. **or_breakout_direction**: Opening range breakout direction
+11. **atm_iv**: At-the-money implied volatility
+12. **volume_ratio**: Volume relative to average
+
+**Status**: ✅ COMPLETED - Ready for Phase 3 model training
