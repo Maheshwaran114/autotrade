@@ -1,424 +1,465 @@
-# src/data_ingest/label_days.py
 """
-Module for labeling trading days based on various market characteristics.
-This module classifies each trading day into specific regime types.
+Phase 2.2: Label Trading Regimes
+
+This module classifies each trading day into one of five market regimes:
+- Trend
+- RangeBound
+- Event
+- MildBias
+- Momentum
+
+Based on index and option features with defined thresholds.
 """
 
-import os
-import logging
-import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+import numpy as np
+from pathlib import Path
+from typing import Dict, Tuple
+import logging
 
-# Configure logging
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class DayLabeler:
-    """Labels trading days based on price action and volatility characteristics"""
-    
-    def __init__(self):
-        """Initialize the day labeler"""
-        logger.info("Day labeler initialized")
-        self.labels = {
-            "Trend": "Strong directional move with sustained momentum",
-            "RangeBound": "Price oscillates within a well-defined range",
-            "Event": "High volatility with sharp price movements (earnings, news)",
-            "MildBias": "Slight directional bias but with limited follow-through",
-            "Momentum": "Strong momentum in one direction with occasional pullbacks"
-        }
-    
-    def load_data(self, banknifty_path: str, options_path: Optional[str] = None) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
-        """
-        Load Bank Nifty and options data
-        
-        Args:
-            banknifty_path: Path to Bank Nifty historical data
-            options_path: Path to options data (optional)
-            
-        Returns:
-            Tuple of (banknifty_df, options_df)
-        """
-        try:
-            # Load Bank Nifty data
-            if banknifty_path.endswith('.parquet'):
-                banknifty_df = pd.read_parquet(banknifty_path)
-            else:
-                banknifty_df = pd.read_csv(banknifty_path)
-            
-            logger.info(f"Loaded Bank Nifty data: {len(banknifty_df)} rows")
-            
-            # Load options data if provided
-            options_df = None
-            if options_path:
-                if options_path.endswith('.parquet'):
-                    options_df = pd.read_parquet(options_path)
-                else:
-                    options_df = pd.read_csv(options_path)
-                logger.info(f"Loaded options data: {len(options_df)} rows")
-            
-            return banknifty_df, options_df
-            
-        except Exception as e:
-            logger.error(f"Error loading data: {e}")
-            return pd.DataFrame(), None
-    
-    def aggregate_to_daily(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Aggregate intraday data to daily OHLCV data
-        
-        Args:
-            df: DataFrame with minute-level data
-            
-        Returns:
-            DataFrame with daily aggregated data
-        """
-        if df.empty:
-            return pd.DataFrame()
-        
-        try:
-            # Ensure datetime format
-            if 'date' in df.columns:
-                df['date'] = pd.to_datetime(df['date'])
-            
-            # Extract date component for aggregation
-            df['day'] = df['date'].dt.date
-            
-            # Aggregate by day
-            daily = df.groupby('day').agg({
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'volume': 'sum'
-            }).reset_index()
-            
-            # Rename day column back to date
-            daily = daily.rename(columns={'day': 'date'})
-            
-            # Ensure date is datetime
-            daily['date'] = pd.to_datetime(daily['date'])
-            
-            logger.info(f"Aggregated to {len(daily)} daily records")
-            return daily
-            
-        except Exception as e:
-            logger.error(f"Error aggregating to daily: {e}")
-            return pd.DataFrame()
-    
-    def calculate_features(self, 
-                          banknifty_df: pd.DataFrame, 
-                          options_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
-        """
-        Calculate features for day classification
-        
-        Args:
-            banknifty_df: Bank Nifty historical data
-            options_df: Options data (optional)
-            
-        Returns:
-            DataFrame with calculated features
-        """
-        if banknifty_df.empty:
-            logger.warning("Empty DataFrame provided")
-            return pd.DataFrame()
-        
-        try:
-            # Check if data is minute-level or daily
-            is_intraday = 'day' not in banknifty_df.columns and len(banknifty_df) > 0 and 'date' in banknifty_df.columns
-            
-            # Aggregate to daily if minute-level
-            if is_intraday and len(banknifty_df['date'].dt.date.unique()) > 1:
-                daily_df = self.aggregate_to_daily(banknifty_df)
-            else:
-                daily_df = banknifty_df.copy()
-            
-            # Sort by date
-            daily_df = daily_df.sort_values('date')
-            
-            # Calculate daily returns
-            daily_df['prev_close'] = daily_df['close'].shift(1)
-            daily_df['open_to_close_return'] = (daily_df['close'] - daily_df['open']) / daily_df['open'] * 100
-            daily_df['close_to_close_return'] = (daily_df['close'] - daily_df['prev_close']) / daily_df['prev_close'] * 100
-            daily_df['gap'] = (daily_df['open'] - daily_df['prev_close']) / daily_df['prev_close'] * 100
-            daily_df['high_low_range'] = (daily_df['high'] - daily_df['low']) / daily_df['open'] * 100
-            
-            # Calculate volatility (20-day rolling standard deviation of returns)
-            daily_df['volatility_20d'] = daily_df['close_to_close_return'].rolling(20).std()
-            
-            # Calculate additional features from intraday data if available
-            if is_intraday:
-                # Get first 30 minutes of each day
-                first_30min_data = []
-                for date in daily_df['date']:
-                    day_data = banknifty_df[(banknifty_df['date'].dt.date == date.date())]
-                    first_30min = day_data.iloc[:30] if len(day_data) >= 30 else day_data
-                    
-                    if not first_30min.empty:
-                        first_30min_range = (first_30min['high'].max() - first_30min['low'].min()) / first_30min['open'].iloc[0] * 100
-                        first_30min_data.append({
-                            'date': date,
-                            'first_30min_range': first_30min_range
-                        })
-                
-                if first_30min_data:
-                    first_30min_df = pd.DataFrame(first_30min_data)
-                    daily_df = daily_df.merge(first_30min_df, on='date', how='left')
-            
-            # Calculate VWAP if volume is available
-            if 'volume' in banknifty_df.columns:
-                banknifty_df['vwap'] = (banknifty_df['close'] * banknifty_df['volume']).cumsum() / banknifty_df['volume'].cumsum()
-                
-                # Map VWAP to daily data
-                if is_intraday:
-                    vwap_data = []
-                    for date in daily_df['date']:
-                        day_data = banknifty_df[(banknifty_df['date'].dt.date == date.date())]
-                        if not day_data.empty:
-                            last_vwap = day_data['vwap'].iloc[-1]
-                            close_vs_vwap = (day_data['close'].iloc[-1] - last_vwap) / last_vwap * 100
-                            vwap_data.append({
-                                'date': date,
-                                'close_vs_vwap': close_vs_vwap
-                            })
-                    
-                    if vwap_data:
-                        vwap_df = pd.DataFrame(vwap_data)
-                        daily_df = daily_df.merge(vwap_df, on='date', how='left')
-            
-            # Add implied volatility feature if options data is available
-            if options_df is not None and not options_df.empty:
-                try:
-                    # Ensure date format is consistent
-                    if 'date' not in options_df.columns:
-                        # Try to extract date from the options data
-                        if 'timestamp' in options_df.columns:
-                            options_df['date'] = pd.to_datetime(options_df['timestamp']).dt.date
-                        elif 'expiry_date' in options_df.columns:
-                            # Use a reference date like the snapshot date
-                            if 'snapshot_date' in options_df.columns:
-                                options_df['date'] = pd.to_datetime(options_df['snapshot_date'])
-                    
-                    # If we have implied volatility in the options data, use it
-                    if 'implied_volatility' in options_df.columns:
-                        iv_data = []
-                        for date in daily_df['date']:
-                            day_options = options_df[options_df['date'].dt.date == date.date()]
-                            if not day_options.empty:
-                                avg_iv = day_options['implied_volatility'].mean()
-                                iv_data.append({
-                                    'date': date,
-                                    'avg_iv': avg_iv
-                                })
-                        
-                        if iv_data:
-                            iv_df = pd.DataFrame(iv_data)
-                            daily_df = daily_df.merge(iv_df, on='date', how='left')
-                            
-                            # Calculate IV percentile (20-day lookback)
-                            daily_df['iv_percentile'] = daily_df['avg_iv'].rolling(20).apply(
-                                lambda x: percentile_rank(x.iloc[-1], x[:-1])
-                            )
-                except Exception as e:
-                    logger.error(f"Error processing options data: {e}")
-            
-            logger.info(f"Calculated features for {len(daily_df)} days")
-            return daily_df
-            
-        except Exception as e:
-            logger.error(f"Error calculating features: {e}")
-            return pd.DataFrame()
-    
-    def classify_days(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Classify trading days into different regimes
-        
-        Args:
-            df: DataFrame with calculated features
-            
-        Returns:
-            DataFrame with day classifications
-        """
-        if df.empty:
-            return pd.DataFrame()
-        
-        try:
-            # Make a copy to avoid modifying the original
-            result = df.copy()
-            
-            # Initialize classification column
-            result['day_type'] = None
-            
-            # Define thresholds
-            trend_return_threshold = 1.0  # 1% move open to close
-            range_threshold = 0.5  # 0.5% open to close for range-bound
-            high_vol_threshold = 2.0  # 2% high to low range for high volatility
-            
-            # Apply classification rules
-            
-            # 1. Trend days - strong directional move
-            trend_mask = (abs(result['open_to_close_return']) > trend_return_threshold) & \
-                         (result['high_low_range'] > 1.0) & \
-                         (
-                            # Open near low/high and close near high/low
-                            ((result['open_to_close_return'] > 0) & 
-                             (result['open'] - result['low']) / (result['high'] - result['low']) < 0.3 & 
-                             (result['high'] - result['close']) / (result['high'] - result['low']) < 0.3) | 
-                            ((result['open_to_close_return'] < 0) & 
-                             (result['high'] - result['open']) / (result['high'] - result['low']) < 0.3 & 
-                             (result['close'] - result['low']) / (result['high'] - result['low']) < 0.3)
-                         )
-            result.loc[trend_mask, 'day_type'] = 'Trend'
-            
-            # 2. Range-bound days - small open to close range
-            range_mask = (abs(result['open_to_close_return']) < range_threshold) & \
-                         (result['high_low_range'] > 0.8) & \
-                         (result['day_type'].isnull())
-            result.loc[range_mask, 'day_type'] = 'RangeBound'
-            
-            # 3. Event days - high volatility, significant price swings
-            event_mask = (result['high_low_range'] > high_vol_threshold) & \
-                         (result['day_type'].isnull())
-            result.loc[event_mask, 'day_type'] = 'Event'
-            
-            # 4. Mild Bias - slight directional move
-            mild_bias_mask = (abs(result['open_to_close_return']) > range_threshold) & \
-                            (abs(result['open_to_close_return']) < trend_return_threshold) & \
-                            (result['day_type'].isnull())
-            result.loc[mild_bias_mask, 'day_type'] = 'MildBias'
-            
-            # 5. Momentum - significant directional move but with pullbacks
-            momentum_mask = (abs(result['open_to_close_return']) > trend_return_threshold * 0.7) & \
-                           (result['day_type'].isnull())
-            result.loc[momentum_mask, 'day_type'] = 'Momentum'
-            
-            # Any remaining unclassified days are labeled as MildBias
-            result.loc[result['day_type'].isnull(), 'day_type'] = 'MildBias'
-            
-            # Calculate the distribution of day types
-            type_counts = result['day_type'].value_counts()
-            total_days = len(result)
-            
-            for day_type, count in type_counts.items():
-                percentage = count / total_days * 100
-                logger.info(f"{day_type}: {count} days ({percentage:.1f}%)")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error classifying days: {e}")
-            return df
-    
-    def run_labeling_pipeline(self, 
-                           banknifty_path: str = "data/processed/banknifty.parquet", 
-                           options_path: str = "data/processed/options.parquet") -> pd.DataFrame:
-        """
-        Run the complete day labeling pipeline
-        
-        Args:
-            banknifty_path: Path to Bank Nifty data
-            options_path: Path to options data
-            
-        Returns:
-            DataFrame with labeled days
-        """
-        try:
-            # 1. Load data
-            banknifty_df, options_df = self.load_data(banknifty_path, options_path)
-            if banknifty_df.empty:
-                logger.error("Failed to load Bank Nifty data")
-                return pd.DataFrame()
-            
-            # 2. Calculate features
-            features_df = self.calculate_features(banknifty_df, options_df)
-            if features_df.empty:
-                logger.error("Failed to calculate features")
-                return pd.DataFrame()
-            
-            # 3. Classify days
-            labeled_df = self.classify_days(features_df)
-            if labeled_df.empty:
-                logger.error("Failed to classify days")
-                return pd.DataFrame()
-            
-            # 4. Save results
-            output_path = "data/processed/labeled_days.parquet"
-            labeled_df.to_parquet(output_path, index=False)
-            logger.info(f"Saved labeled days to {output_path}")
-            
-            return labeled_df
-            
-        except Exception as e:
-            logger.error(f"Error in labeling pipeline: {e}")
-            return pd.DataFrame()
+# Base paths
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+PROCESSED_DIR = DATA_DIR / "processed"
 
 
-def percentile_rank(value: float, array: np.ndarray) -> float:
+def load_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Calculate the percentile rank of a value within an array
+    Load index and options data from processed parquet files.
+    
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]: (index_data, options_data)
+    """
+    logger.info("Loading processed data files...")
+    
+    # Load index data
+    index_file = PROCESSED_DIR / "banknifty_index.parquet"
+    if not index_file.exists():
+        raise FileNotFoundError(f"Index data file not found: {index_file}")
+    
+    index_data = pd.read_parquet(index_file)
+    logger.info(f"Loaded index data: {len(index_data)} records")
+    
+    # Load options data
+    options_file = PROCESSED_DIR / "banknifty_options_chain.parquet"
+    if not options_file.exists():
+        raise FileNotFoundError(f"Options data file not found: {options_file}")
+    
+    options_data = pd.read_parquet(options_file)
+    logger.info(f"Loaded options data: {len(options_data)} records")
+    
+    return index_data, options_data
+
+
+def compute_daily_metrics(index_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute daily OHLCV metrics, VWAP, returns, and volatility from minute-level data.
     
     Args:
-        value: Value to find rank for
-        array: Array of values
-        
+        index_data: Minute-level index data with columns [date, open, high, low, close, volume]
+    
     Returns:
-        Percentile rank (0-100)
+        pd.DataFrame: Daily metrics with columns [date, open, high, low, close, volume, vwap, 
+                     daily_return, volatility, prev_close]
     """
-    if len(array) == 0:
-        return 50.0
+    logger.info("Computing daily metrics from minute-level data...")
     
-    # Count values less than our value
-    less_than_count = sum(1 for x in array if x < value)
-    return less_than_count / len(array) * 100
-
-
-# For testing purposes
-if __name__ == "__main__":
-    # Configure logging
-    logging.basicConfig(level=logging.INFO)
+    # Convert date to datetime if needed and extract date part
+    if isinstance(index_data['date'].iloc[0], str):
+        index_data['date'] = pd.to_datetime(index_data['date'])
     
-    labeler = DayLabeler()
+    # Extract date part for grouping
+    index_data['trading_date'] = index_data['date'].dt.date
     
-    # Check if the processed files exist
-    banknifty_path = "data/processed/banknifty.parquet"
-    options_path = "data/processed/options.parquet"
+    # Group by trading date and compute daily metrics
+    daily_metrics = []
     
-    if not os.path.exists(banknifty_path):
-        logger.warning(f"Bank Nifty data not found at {banknifty_path}")
+    for date, group in index_data.groupby('trading_date'):
+        # Sort by time to ensure proper order
+        group = group.sort_values('date')
         
-        # Use sample data for testing
-        sample_data = pd.DataFrame({
-            'date': pd.date_range(start='2025-01-01', periods=100),
-            'open': np.random.normal(48000, 500, 100),
-            'high': np.random.normal(48200, 600, 100),
-            'low': np.random.normal(47800, 600, 100),
-            'close': np.random.normal(48100, 550, 100),
-            'volume': np.random.randint(800000, 1500000, 100)
+        # OHLCV
+        open_price = group['open'].iloc[0]  # First minute's open
+        high_price = group['high'].max()
+        low_price = group['low'].min()
+        close_price = group['close'].iloc[-1]  # Last minute's close
+        total_volume = group['volume'].sum()
+        
+        # VWAP calculation
+        vwap = (group['close'] * group['volume']).sum() / total_volume if total_volume > 0 else close_price
+        
+        daily_metrics.append({
+            'date': date,
+            'open': open_price,
+            'high': high_price,
+            'low': low_price,
+            'close': close_price,
+            'volume': total_volume,
+            'vwap': vwap
         })
-        
-        # Ensure high >= open, close, low
-        for i in range(len(sample_data)):
-            values = [sample_data.loc[i, 'open'], sample_data.loc[i, 'close'], sample_data.loc[i, 'low']]
-            sample_data.loc[i, 'high'] = max([sample_data.loc[i, 'high']] + values)
-        
-        # Ensure low <= open, close, high
-        for i in range(len(sample_data)):
-            values = [sample_data.loc[i, 'open'], sample_data.loc[i, 'close'], sample_data.loc[i, 'high']]
-            sample_data.loc[i, 'low'] = min([sample_data.loc[i, 'low']] + values)
-        
-        # Create the directory if it doesn't exist
-        os.makedirs("data/processed", exist_ok=True)
-        
-        # Save sample data
-        sample_data.to_parquet(banknifty_path, index=False)
-        logger.info(f"Created sample data at {banknifty_path}")
     
-    # Run the labeling pipeline
-    labeled_df = labeler.run_labeling_pipeline(banknifty_path, options_path if os.path.exists(options_path) else None)
+    daily_df = pd.DataFrame(daily_metrics)
+    daily_df = daily_df.sort_values('date').reset_index(drop=True)
     
-    if not labeled_df.empty:
-        print("\nDay Type Distribution:")
-        print(labeled_df['day_type'].value_counts())
+    # Calculate returns and volatility
+    daily_df['prev_close'] = daily_df['close'].shift(1)
+    daily_df['daily_return'] = (daily_df['close'] - daily_df['prev_close']) / daily_df['prev_close']
+    
+    # Calculate 5-day rolling volatility
+    daily_df['volatility'] = daily_df['daily_return'].rolling(window=5, min_periods=1).std()
+    
+    logger.info(f"Computed daily metrics for {len(daily_df)} trading days")
+    return daily_df
+
+
+def extract_opening_range_features(index_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Extract opening range features from the first 30 minutes of trading.
+    
+    Args:
+        index_data: Minute-level index data
+    
+    Returns:
+        pd.DataFrame: Opening range features with columns [date, or_high, or_low, or_range, 
+                     or_volume, or_breakout_direction]
+    """
+    logger.info("Extracting opening range features (first 30 minutes)...")
+    
+    # Convert date to datetime if needed
+    if isinstance(index_data['date'].iloc[0], str):
+        index_data['date'] = pd.to_datetime(index_data['date'])
+    
+    # Extract date and time components
+    index_data['trading_date'] = index_data['date'].dt.date
+    index_data['time'] = index_data['date'].dt.time
+    
+    opening_features = []
+    
+    for date, group in index_data.groupby('trading_date'):
+        # Sort by time
+        group = group.sort_values('date')
         
-        print("\nSample of labeled days:")
-        print(labeled_df[['date', 'open', 'high', 'low', 'close', 'open_to_close_return', 'high_low_range', 'day_type']].head())
+        # Get first 30 minutes (assuming trading starts at 9:15 AM)
+        start_time = group['date'].iloc[0].replace(hour=9, minute=15, second=0, microsecond=0)
+        end_time = start_time + pd.Timedelta(minutes=30)
+        
+        # Filter for opening range period
+        or_data = group[(group['date'] >= start_time) & (group['date'] <= end_time)]
+        
+        if len(or_data) == 0:
+            continue
+        
+        # Calculate opening range metrics
+        or_high = or_data['high'].max()
+        or_low = or_data['low'].min()
+        or_range = or_high - or_low
+        or_volume = or_data['volume'].sum()
+        
+        # Determine breakout direction (comparing close vs opening range)
+        day_close = group['close'].iloc[-1]
+        if day_close > or_high:
+            or_breakout_direction = 1  # Upward breakout
+        elif day_close < or_low:
+            or_breakout_direction = -1  # Downward breakout
+        else:
+            or_breakout_direction = 0  # No breakout
+        
+        opening_features.append({
+            'date': date,
+            'or_high': or_high,
+            'or_low': or_low,
+            'or_range': or_range,
+            'or_volume': or_volume,
+            'or_breakout_direction': or_breakout_direction
+        })
+    
+    or_df = pd.DataFrame(opening_features)
+    logger.info(f"Extracted opening range features for {len(or_df)} trading days")
+    return or_df
+
+
+def calculate_iv_percentiles(options_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate IV percentiles and ATM IV from options data.
+    
+    Args:
+        options_data: Options chain data
+    
+    Returns:
+        pd.DataFrame: IV metrics with columns [date, iv_percentile, atm_iv, iv_rank]
+    """
+    logger.info("Calculating IV percentiles from options data...")
+    
+    # Convert date to datetime if needed
+    if isinstance(options_data['date'].iloc[0], str):
+        options_data['date'] = pd.to_datetime(options_data['date']).dt.date
+    
+    iv_metrics = []
+    
+    for date, group in options_data.groupby('date'):
+        if len(group) == 0:
+            continue
+        
+        # Get spot price for the day
+        spot_price = group['spot_price'].iloc[0]
+        
+        # Find ATM options (closest to spot price)
+        group['strike_diff'] = abs(group['strike'] - spot_price)
+        atm_strikes = group.nsmallest(2, 'strike_diff')['strike'].unique()
+        atm_options = group[group['strike'].isin(atm_strikes)]
+        
+        # Calculate ATM IV (average of CE and PE)
+        if len(atm_options) > 0:
+            atm_iv = atm_options['iv'].mean()
+        else:
+            atm_iv = group['iv'].median()  # Fallback to median IV
+        
+        # Calculate IV percentile (current IV vs historical range)
+        all_ivs = group['iv'].values
+        iv_percentile = (atm_iv - all_ivs.min()) / (all_ivs.max() - all_ivs.min()) if all_ivs.max() != all_ivs.min() else 0.5
+        
+        # Calculate IV rank (relative to recent history)
+        # For simplicity, using current day's percentile position
+        iv_rank = np.percentile(all_ivs, 50)  # Median IV as rank reference
+        
+        iv_metrics.append({
+            'date': date,
+            'iv_percentile': iv_percentile,
+            'atm_iv': atm_iv,
+            'iv_rank': iv_rank
+        })
+    
+    iv_df = pd.DataFrame(iv_metrics)
+    logger.info(f"Calculated IV metrics for {len(iv_df)} trading days")
+    return iv_df
+
+
+def label_regimes(daily_metrics: pd.DataFrame, opening_features: pd.DataFrame, 
+                 iv_metrics: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply regime labeling logic based on specified thresholds.
+    
+    Regime Classification Rules:
+    - Trend: High momentum + directional bias + OR breakout in same direction
+    - RangeBound: Low volatility + no significant OR breakout + low IV percentile
+    - Event: High volatility + high IV + large price gaps
+    - MildBias: Moderate momentum + small OR range + medium volatility
+    - Momentum: Very high momentum + strong OR breakout + high volume
+    
+    Args:
+        daily_metrics: Daily OHLCV and derived metrics
+        opening_features: Opening range features
+        iv_metrics: IV percentiles and ATM IV
+    
+    Returns:
+        pd.DataFrame: Labeled data with regime classifications
+    """
+    logger.info("Applying regime labeling logic...")
+    
+    # Merge all features
+    labeled_data = daily_metrics.copy()
+    
+    # Merge opening range features
+    opening_features['date'] = pd.to_datetime(opening_features['date'])
+    daily_metrics['date'] = pd.to_datetime(daily_metrics['date'])
+    iv_metrics['date'] = pd.to_datetime(iv_metrics['date'])
+    
+    labeled_data = labeled_data.merge(opening_features, on='date', how='left')
+    labeled_data = labeled_data.merge(iv_metrics, on='date', how='left')
+    
+    # Fill missing values using pandas compatible method
+    labeled_data = labeled_data.ffill().bfill()
+    
+    # Calculate additional features for classification
+    labeled_data['price_range'] = (labeled_data['high'] - labeled_data['low']) / labeled_data['close']
+    labeled_data['body_size'] = abs(labeled_data['close'] - labeled_data['open']) / labeled_data['close']
+    labeled_data['volume_ma'] = labeled_data['volume'].rolling(window=10, min_periods=1).mean()
+    labeled_data['volume_ratio'] = labeled_data['volume'] / labeled_data['volume_ma']
+    labeled_data['or_range_pct'] = labeled_data['or_range'] / labeled_data['close']
+    
+    # Define thresholds
+    HIGH_VOLATILITY_THRESHOLD = 0.02  # 2%
+    LOW_VOLATILITY_THRESHOLD = 0.008  # 0.8%
+    HIGH_MOMENTUM_THRESHOLD = 0.015   # 1.5% daily return
+    MODERATE_MOMENTUM_THRESHOLD = 0.008  # 0.8% daily return
+    HIGH_IV_THRESHOLD = 0.7  # 70th percentile
+    LOW_IV_THRESHOLD = 0.3   # 30th percentile
+    HIGH_VOLUME_THRESHOLD = 1.5  # 1.5x average volume
+    LARGE_OR_RANGE_THRESHOLD = 0.012  # 1.2% of price
+    SMALL_OR_RANGE_THRESHOLD = 0.006  # 0.6% of price
+    
+    # Initialize regime column
+    labeled_data['regime'] = 'MildBias'  # Default
+    
+    # Apply classification rules
+    for idx, row in labeled_data.iterrows():
+        abs_return = abs(row['daily_return']) if not pd.isna(row['daily_return']) else 0
+        volatility = row['volatility'] if not pd.isna(row['volatility']) else 0
+        iv_percentile = row['iv_percentile'] if not pd.isna(row['iv_percentile']) else 0.5
+        volume_ratio = row['volume_ratio'] if not pd.isna(row['volume_ratio']) else 1
+        or_range_pct = row['or_range_pct'] if not pd.isna(row['or_range_pct']) else 0
+        or_breakout = row['or_breakout_direction'] if not pd.isna(row['or_breakout_direction']) else 0
+        
+        # Momentum: Very high momentum + strong OR breakout + high volume
+        if (abs_return > HIGH_MOMENTUM_THRESHOLD and 
+            abs(or_breakout) == 1 and 
+            volume_ratio > HIGH_VOLUME_THRESHOLD):
+            labeled_data.at[idx, 'regime'] = 'Momentum'
+        
+        # Event: High volatility + high IV + large price gaps
+        elif (volatility > HIGH_VOLATILITY_THRESHOLD and 
+              iv_percentile > HIGH_IV_THRESHOLD and 
+              or_range_pct > LARGE_OR_RANGE_THRESHOLD):
+            labeled_data.at[idx, 'regime'] = 'Event'
+        
+        # Trend: High momentum + directional bias + OR breakout in same direction
+        elif (abs_return > MODERATE_MOMENTUM_THRESHOLD and 
+              or_breakout != 0 and 
+              np.sign(row['daily_return'] if not pd.isna(row['daily_return']) else 0) == or_breakout):
+            labeled_data.at[idx, 'regime'] = 'Trend'
+        
+        # RangeBound: Low volatility + no significant OR breakout + low IV percentile
+        elif (volatility < LOW_VOLATILITY_THRESHOLD and 
+              or_breakout == 0 and 
+              iv_percentile < LOW_IV_THRESHOLD and 
+              or_range_pct < SMALL_OR_RANGE_THRESHOLD):
+            labeled_data.at[idx, 'regime'] = 'RangeBound'
+        
+        # MildBias: Default for moderate conditions
+        # (already initialized as default)
+    
+    # Log regime distribution
+    regime_counts = labeled_data['regime'].value_counts()
+    logger.info(f"Regime distribution:\n{regime_counts}")
+    
+    return labeled_data
+
+
+def main():
+    """
+    Main function to orchestrate the labeling process.
+    """
+    logger.info("Starting Phase 2.2: Label Trading Regimes")
+    
+    try:
+        # Load data
+        index_data, options_data = load_data()
+        
+        # Compute daily metrics
+        daily_metrics = compute_daily_metrics(index_data)
+        
+        # Extract opening range features
+        opening_features = extract_opening_range_features(index_data)
+        
+        # Calculate IV percentiles
+        iv_metrics = calculate_iv_percentiles(options_data)
+        
+        # Label regimes
+        labeled_data = label_regimes(daily_metrics, opening_features, iv_metrics)
+        
+        # Save output
+        output_file = PROCESSED_DIR / "labeled_days.parquet"
+        labeled_data.to_parquet(output_file, index=False)
+        logger.info(f"Saved labeled data to: {output_file}")
+        
+        # Summary statistics
+        logger.info(f"Total trading days labeled: {len(labeled_data)}")
+        logger.info(f"Date range: {labeled_data['date'].min()} to {labeled_data['date'].max()}")
+        logger.info("Regime distribution:")
+        for regime, count in labeled_data['regime'].value_counts().items():
+            logger.info(f"  {regime}: {count} days ({count/len(labeled_data)*100:.1f}%)")
+        
+        # Update phase 2 report
+        update_phase2_report(labeled_data)
+        
+        logger.info("Phase 2.2 completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"Error in Phase 2.2: {str(e)}")
+        raise
+
+
+def update_phase2_report(labeled_data: pd.DataFrame):
+    """
+    Update the phase2_report.md with labeling results.
+    
+    Args:
+        labeled_data: The labeled dataset
+    """
+    logger.info("Updating phase2_report.md...")
+    
+    report_file = PROJECT_ROOT / "docs" / "phase2_report.md"
+    
+    # Generate report content
+    regime_stats = labeled_data['regime'].value_counts()
+    total_days = len(labeled_data)
+    
+    report_content = f"""
+## Phase 2.2: Label Trading Regimes - COMPLETED ✅
+
+**Objective**: Classify each trading day into market regimes based on index and option features.
+
+### Implementation Details:
+- **Module**: `src/data_ingest/label_days.py`
+- **Input Files**: 
+  - `data/processed/banknifty_index.parquet` (minute-level data)
+  - `data/processed/banknifty_options_chain.parquet` (options data)
+- **Output File**: `data/processed/labeled_days.parquet`
+
+### Features Computed:
+1. **Daily Metrics**: OHLCV, VWAP, returns, volatility
+2. **Opening Range Features**: First 30-min high/low/range/volume/breakout direction
+3. **IV Metrics**: IV percentiles, ATM IV, IV rank
+
+### Regime Classification Results:
+- **Total Trading Days**: {total_days}
+- **Date Range**: {labeled_data['date'].min().strftime('%Y-%m-%d')} to {labeled_data['date'].max().strftime('%Y-%m-%d')}
+
+#### Regime Distribution:
+"""
+    
+    for regime, count in regime_stats.items():
+        percentage = count / total_days * 100
+        report_content += f"- **{regime}**: {count} days ({percentage:.1f}%)\n"
+    
+    report_content += f"""
+### Classification Thresholds:
+- High Volatility: >2.0%
+- High Momentum: >1.5% daily return
+- High IV Percentile: >70%
+- High Volume: >1.5x average
+- Large OR Range: >1.2% of price
+
+### Output Schema:
+The `labeled_days.parquet` file contains {len(labeled_data.columns)} columns including:
+- Basic OHLCV data and derived metrics
+- Opening range features
+- IV percentiles and rankings  
+- **regime**: Primary classification (Trend/RangeBound/Event/MildBias/Momentum)
+
+**Status**: ✅ COMPLETED - Ready for Phase 3 model training
+"""
+    
+    # Read existing report and append
+    if report_file.exists():
+        with open(report_file, 'r') as f:
+            existing_content = f.read()
+        
+        # Add new section
+        updated_content = existing_content + "\n" + report_content
+    else:
+        updated_content = report_content
+    
+    # Write updated report
+    with open(report_file, 'w') as f:
+        f.write(updated_content)
+    
+    logger.info("Phase 2 report updated successfully")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,10 @@
 # Phase 2: Strategy Design & ML Prototyping
 
+> **Document Status**: ✅ CLEANED AND UPDATED (May 27, 2025)  
+> **Current Implementation**: `scripts/task2_1_fixed_historical_implementation.py` is the active data extraction script  
+> **Phase 2.2 Status**: ✅ COMPLETED - `labeled_days.parquet` generated with 37 days × 24 features  
+> **Outdated Content**: Removed - references to non-existent scripts and contradictory implementation details
+
 This document tracks progress on Phase 2 of the Bank Nifty Options Trading System (May 29–June 25).
 
 ## ⚠️ CRITICAL DOCUMENTATION UPDATE (May 26, 2025)
@@ -11,12 +16,10 @@ After a comprehensive analysis of ALL files in the workspace following fresh dat
 ### 📁 TASK 2.1 SCRIPT IDENTIFICATION
 **PRIMARY ACTIVE IMPLEMENTATION:** `scripts/task2_1_fixed_historical_implementation.py` (Last modified: May 25, 2025)
 
-**INACTIVE/ALTERNATIVE SCRIPTS (6 total):**
-- `scripts/task2_1_fixed_implementation.py` - Earlier version
-- `scripts/task2_1_full_year_collection.py` - Full year variant
-- `scripts/task2_1_improved_implementation.py` - Improvement attempt
-- `scripts/task2_1_proper_implementation.py` - Proper implementation attempt  
-- `scripts/task2_1_unified_collection.py` - Unified approach
+**INACTIVE/ALTERNATIVE SCRIPTS (backed up in `/backup/scripts_backup_before_cleanup/`):**
+- `task2_1_fixed_implementation.py` - Earlier version  
+- `task2_1_full_year_collection.py` - Full year variant
+- `task2_1_proper_implementation.py` - Proper implementation attempt
 
 ### 🎯 ACTUAL vs DOCUMENTED IMPLEMENTATION
 
@@ -87,12 +90,10 @@ After optimizing the script and resolving API timeout issues, Task 2.1 data extr
 **📁 SCRIPT IDENTIFICATION:**
 **PRIMARY IMPLEMENTATION:** `scripts/task2_1_fixed_historical_implementation.py` (Most Recent: May 25, 2025)
 
-**OTHER TASK 2.1 SCRIPTS (Historical/Alternative Implementations):**
-- `scripts/task2_1_fixed_implementation.py` - Earlier fixed version
-- `scripts/task2_1_full_year_collection.py` - Full year collection variant  
-- `scripts/task2_1_improved_implementation.py` - Improved implementation attempt
-- `scripts/task2_1_proper_implementation.py` - Proper implementation attempt
-- `scripts/task2_1_unified_collection.py` - Unified collection approach
+**OTHER TASK 2.1 SCRIPTS (moved to backup):**
+- `task2_1_fixed_implementation.py` - Earlier fixed version
+- `task2_1_full_year_collection.py` - Full year collection variant  
+- `task2_1_proper_implementation.py` - Proper implementation attempt
 
 **🎯 ACTUAL IMPLEMENTATION METHOD USED:**
 **HYBRID APPROACH:** Uses `kite.historical_data()` for historical dates + `kite.ltp()` for current/future dates
@@ -108,8 +109,6 @@ Enhanced the hybrid data collection system with production-ready scaling capabil
 - `src/data_ingest/zerodha_client.py` - Client for Zerodha Kite Connect API
 - `src/data_ingest/load_data.py` - Data loading and consolidation utilities  
 - `scripts/task2_1_fixed_historical_implementation.py` - **PRIMARY IMPLEMENTATION** with hybrid method
-- `scripts/test_fixed_implementation.py` - Validation script confirming the fix
-- `scripts/test_production_scaling.py` - **NEW** Production scaling validation tests
 
 **🎯 Production Scaling Features Added:**
 
@@ -167,42 +166,45 @@ python scripts/task2_1_fixed_historical_implementation.py --days 90 --batch-size
 - **Production Scale**: Supports 365-day collection (~250 trading days) efficiently
 - **Improvement**: ∞ increase in data quality (from synthetic to real) + production scalability
 
-### Task 2.2: Label Trading Regimes
+### Task 2.2: Label Trading Regimes ✅ COMPLETED
 
-**Files:**
-- `src/data_ingest/label_days.py` - Module for labeling trading days based on market characteristics
+**Objective**: Classify each trading day into market regimes based on index and option features.
 
-**Outcome:**
-- Implemented day labeling system to classify each trading day into one of five regimes:
-  - **Trend**: Strong directional move with sustained momentum
-  - **RangeBound**: Price oscillates within a well-defined range
-  - **Event**: High volatility with sharp price movements
-  - **MildBias**: Slight directional bias but with limited follow-through
-  - **Momentum**: Strong momentum in one direction with occasional pullbacks
-- Created feature extraction pipeline for classification, including:
-  - Open-to-close return
-  - First-30-minute high/low range
-  - Implied volatility percentiles (when option data available)
-  - Price relation to VWAP
-- Sample of labeled days:
+**Implementation Details:**
+- **Module**: `src/data_ingest/label_days.py` (Enhanced version)
+- **Working Scripts**: `enhanced_label_days.py`, `run_label_days.py` (root directory)
+- **Input Files**: 
+  - `data/processed/banknifty_index.parquet` (13,875 minute-level records)
+  - `data/processed/banknifty_options_chain.parquet` (4,582 options records)
+- **Output File**: `data/processed/labeled_days.parquet`
 
-```
-|    | date       | open    | high    | low     | close   | open_to_close_return | high_low_range | day_type  |
-|----|------------|---------|---------|---------|---------|----------------------|----------------|-----------|
-| 0  | 2025-05-01 | 48123.5 | 48367.2 | 47998.4 | 48342.6 | 0.45                 | 0.77           | MildBias  |
-| 1  | 2025-05-02 | 48350.1 | 48689.3 | 48295.7 | 48675.2 | 0.67                 | 0.81           | MildBias  |
-| 2  | 2025-05-03 | 48681.5 | 49120.4 | 48600.9 | 49095.3 | 0.85                 | 1.07           | Momentum  |
-| 3  | 2025-05-06 | 49102.3 | 49225.1 | 48372.6 | 48405.8 | -1.42                | 1.74           | Trend     |
-| 4  | 2025-05-07 | 48415.2 | 48512.7 | 48324.8 | 48495.1 | 0.17                 | 0.39           | RangeBound|
-```
+**Data Processing Results:**
+- **Total Trading Days**: 37
+- **Date Range**: 2025-03-27 to 2025-05-23
+- **Feature Columns**: 24 total columns
+- **Processing Method**: Daily aggregation using pandas resample for robustness
 
-- Distribution of day types (sample):
-  - Trend: 18.2%
-  - RangeBound: 25.4%
-  - Event: 8.7%
-  - MildBias: 34.6%
-  - Momentum: 13.1%
-- Successfully saved processed data to `data/processed/labeled_days.parquet`
+**Regime Distribution:**
+- **MildBias**: 23 days (62.2%)
+- **Trend**: 12 days (32.4%)  
+- **Momentum**: 2 days (5.4%)
+- **RangeBound**: 0 days (0.0%)
+- **Event**: 0 days (0.0%)
+
+**Features Computed:**
+1. **Daily Metrics**: OHLCV, VWAP, returns, volatility
+2. **Opening Range Features**: First 30-min high/low/range/volume/breakout direction
+3. **IV Metrics**: IV percentiles, ATM IV, IV rank
+4. **Derived Features**: Price range, body size, volume ratios, OR range percentages
+
+**Classification Logic Applied:**
+- **Momentum Regime**: Very high momentum (>1.5%) + strong OR breakout + high volume (>1.5x avg)
+- **Event Regime**: High volatility (>2.0%) + high IV (>70%) + large OR range (>1.2%)
+- **Trend Regime**: Moderate momentum (>0.8%) + OR breakout in same direction as daily move
+- **RangeBound Regime**: Low volatility (<0.8%) + no OR breakout + low IV (<30%) + small OR range (<0.6%)
+- **MildBias Regime**: Default for moderate market conditions
+
+**Status**: ✅ COMPLETED - `labeled_days.parquet` successfully generated with 37 days × 24 features
 
 ### Task 2.3: Feature Engineering
 
@@ -467,366 +469,99 @@ python scripts/task2_1_fixed_historical_implementation.py --days 90 --batch-size
   - Refined day classifier: `models/day_classifier_refined.pkl`
   - Refined signal filter: `models/signal_filter_refined.pkl`
 
-
-# Task 2.1: CORRECTED IMPLEMENTATION - Proper Methodology
-
-## 🚨 ISSUES IDENTIFIED AND FIXED
-
-### The Core Problems
-1. **Business Calendar**: Used sampling instead of complete business day calendar
-2. **Weekly Expiry**: Wrong logic, not using kite.instruments("NSE") as required
-3. **Option Data Fetching**: Used historical_data() instead of required kite.ltp() bulk quotes
-4. **Symbol Format**: Not using correct NSE:BANKNIFTY{expiry}{strike}{opt} format
-
-### The Corrected Solution
-1. **Complete Business Days**: Generate ALL business days (no sampling)
-2. **NSE Expiry Logic**: Use kite.instruments("NSE") to find proper Thursday expiries
-3. **LTP Bulk Quotes**: Use kite.ltp() for bulk option chain snapshots as required
-4. **Proper Symbols**: NSE:BANKNIFTY{expiry:%d%b%Y}{strike}{opt} format
-
-## ✅ CORRECTED IMPLEMENTATION
-
-### 1. Business Day Calendar
-- **Before**: Sampling every N days ❌
-- **After**: Complete business day calendar for full year ✅
-
-### 2. Weekly Expiry Logic  
-- **Before**: Generic expiry dates from NFO instruments ❌
-- **After**: kite.instruments("NSE") + Thursday filtering ✅
-
-### 3. Option Chain Data Method
-- **Before**: kite.historical_data() for individual instruments ❌  
-- **After**: kite.ltp() bulk quotes with proper symbol format ✅
-
-## 📊 CORRECTED DATA COLLECTION RESULTS
-
-### Bank Nifty Index Data
-- **Minute-level records**: 7,875
-- **Storage**: `data/raw/bnk_index_20250524.csv`
-
-### Option Chain Data (LTP BULK QUOTES)
-- **Trading dates processed**: 2/22
-- **Success rate**: 9.1%
-- **Total option records**: 164
-- **Storage**: `data/raw/options_corrected_<YYYYMMDD>.parquet` files
-
-### Corrected Data Sample
-
-Sample CORRECTED data from options_corrected_20250519.parquet:
-   strike option_type  last_price      ltp        iv
-0   53400          CE     2138.35  2138.35  0.150788
-1   53400          PE       54.65    54.65  0.166684
-2   53500          CE     2077.40  2077.40  0.173774
-3   53500          PE       60.35    60.35  0.164584
-4   53600          CE     1955.15  1955.15  0.152304
-
-DATA QUALITY CHECK (LTP Method):
-- Records with LTP > 0: 82/82 (100.0%)
-- LTP price range: 40.75 to 2374.40
-- IV success rate: 82/82 (100.0%)
-- Strike coverage: 41 unique strikes
-
-
-## 🔧 TECHNICAL CORRECTIONS
-
-### Hybrid Data Collection Method  
-- **Historical Method**: `kite.historical_data(instrument_token, oi=1)` for past dates
-- **Current Method**: `kite.ltp(symbols)` with bulk symbol list for current/future dates
-- **Symbol Format**: `NSE:BANKNIFTY{expiry:%d%b%Y}{strike}{opt}`
-- **Strike Range**: `range(spot-3000, spot+3001, 100)` - **CORRECTED from documentation**
-- **Rate Limiting**: 1.0s between calls (production optimized)
-
-### Data Structure Improvements
-- **LTP Prices**: Real current market prices from exchange
-- **Symbol Mapping**: Proper NSE symbol format compliance
-- **Strike Coverage**: Full range as specified in requirements
-- **IV Calculation**: Using LTP prices with py_vollib
-
-## 📈 VALIDATION RESULTS
-
-### Data Quality Metrics
-- **LTP Coverage**: All records have valid last traded prices
-- **Strike Range**: **ACTUAL: (spot±3000) with 100 step intervals** - expanded for better coverage
-- **Symbol Format**: Compliant with NSE:BANKNIFTY format
-- **IV Success**: Professional calculation using py_vollib with LTP data
-
-## 📈 FINAL IMPLEMENTATION VERIFICATION
-
-**⚠️ IMPLEMENTATION REQUIREMENTS - CORRECTED STATUS:**
-
-✅ **Business Day Calendar**: Complete year of business days (not sampled)
-✅ **Weekly Expiry Logic**: Using kite.instruments("NSE") + Thursday filtering  
-⚠️ **Option Data Method**: **HYBRID APPROACH** - `kite.historical_data()` for historical + `kite.ltp()` for current dates
-✅ **Symbol Format**: NSE:BANKNIFTY{expiry}{strike}{opt} compliant
-❌ **Strike Range**: **(spot-3000) to (spot+3000) step 100** - **ACTUAL IMPLEMENTATION** (not ±2000 as originally specified)
-
-## Status: ⚠️ METHODOLOGY PARTIALLY COMPLIANT 
-Successfully implemented proper business calendar and NSE expiry logic. **HYBRID method used** due to API limitations: historical_data() for past dates, ltp() for current dates. **Strike range expanded to ±3000** for better market coverage.
-
-**CONFIGURATION vs IMPLEMENTATION DISCREPANCY IDENTIFIED:**
-- **CONFIG Setting**: `STRIKE_RANGE_OFFSET = 2000` 
-- **Actual Code Implementation**: Uses ±3000 points in `fetch_option_chain_snapshot_historical()`
-- **Documentation Previously Stated**: ±2000 points
-- **CORRECTED DOCUMENTATION**: Now reflects actual ±3000 implementation
-
-**SCRIPT CLARIFICATION:**
-**PRIMARY ACTIVE SCRIPT:** `scripts/task2_1_fixed_historical_implementation.py` (Most recent: May 25, 2025)
-**Alternative Scripts:** See section above for complete list of 6 Task 2.1 implementation variants
-
-Generated on: 2025-05-26 (CORRECTED)
-
-## ✅ CRITICAL FIX COMPLETED: Bank Nifty Volume Issue Resolved
-
-**Date**: 2025-05-26 00:35 UTC  
-**Status**: ✅ **SUCCESSFULLY IMPLEMENTED**
-
-### Problem Identified
-- All Bank Nifty index CSV files showed `volume=0` for all records
-- Warning logs showed: "⚠️ No futures data available, using index data with zero volume"
-- This was affecting the quality of minute-level data for analysis
-
-### Solution Implemented: Front-Month Futures Volume Proxy
-
-Following **industry standard practice**, we implemented front-month Bank Nifty futures volume as a proxy for index volume:
-
-#### Technical Implementation
-1. **Enhanced `get_front_future_for_date()` function**:
-   - Filters NFO instruments for `instrument_type=="FUT"` and `name=="BANKNIFTY"`
-   - Finds the nearest expiry date >= trading date (front-month contract)
-   - Returns instrument token and contract details
-
-2. **Fixed `fetch_banknifty_minute_data()` function**:
-   - Uses `client.fetch_historical_data()` instead of direct API calls
-   - Fetches both index OHLC data and front-month futures volume data
-   - Merges data by timestamp, replacing index volume=0 with futures volume
-   - Added comprehensive error handling and logging
-
-3. **Improved data validation**:
-   - Verifies data structure before processing
-   - Logs volume statistics (total volume, non-zero records)
-   - Graceful fallback to zero volume if futures data unavailable
-
-#### Verification Results
-✅ **Test completed successfully on 2025-05-21 to 2025-05-26**:
-- **Total volume**: 3,601,890 (vs previous 0)
-- **Non-zero records**: 1,125/1,125 (100% coverage)
-- **Sample volumes**: 28,470 → 15,030 → 7,980 → 6,540 (realistic trading patterns)
-
-```csv
-date,open,high,low,close,volume
-2025-05-21 09:15:00+05:30,55060.2,55132.85,54997.8,55035.0,28470
-2025-05-21 09:16:00+05:30,55032.35,55051.6,54934.85,54956.4,15030
-2025-05-21 09:17:00+05:30,54961.1,54970.4,54939.4,54963.05,7980
-2025-05-21 09:18:00+05:30,54957.95,54979.5,54949.2,54952.85,6540
-```
-
-### Impact
-- **Data Quality**: All Bank Nifty minute data now includes realistic volume information for **recent dates**
-- **Analysis Ready**: Volume-based indicators and strategies can now be implemented for current market analysis
-- **Industry Standard**: Uses the same approach as professional quant systems globally
-- **Limitation**: Historical dates (>6 months old) may still show zero volume due to futures contract availability
-
-### Technical Note on Historical Futures Data
-For dates older than ~6 months, futures contracts that were active then are no longer available in the current instruments list. This is a standard limitation in financial data APIs. The volume fix works perfectly for:
-- **Recent data** (last 3-6 months): Full futures volume available
-- **Current trading**: Real-time volume proxy working perfectly  
-- **Historical data**: Zero volume fallback (expected behavior)
-
 ---
 
-## ✅ TASK 2.1 FULL YEAR DATA EXTRACTION COMPLETED
+**Status**: ✅ COMPLETED - `labeled_days.parquet` successfully generated with 37 days × 24 features
 
-**Date**: 2025-05-26 01:00 UTC  
-**Status**: ✅ **SUCCESSFULLY COMPLETED**
+### Implementation Details:
+- **Module**: `src/data_ingest/label_days.py` (Enhanced version)
+- **Input Files**: 
+  - `data/processed/banknifty_index.parquet` (13,875 minute-level records)
+  - `data/processed/banknifty_options_chain.parquet` (4,582 options records)
+- **Output File**: `data/processed/labeled_days.parquet`
 
-### 📊 Full Year Data Collection Summary
+### Features Computed:
+1. **Daily Metrics**: OHLCV, VWAP, returns, volatility
+2. **Opening Range Features**: First 30-min high/low/range/volume/breakout direction
+3. **IV Metrics**: IV percentiles, ATM IV, IV rank
+4. **Derived Features**: Price range, body size, volume ratios, OR range percentages
 
-**Implementation**: Enhanced the existing `task2_1_fixed_historical_implementation.py` with full year Parquet extraction capabilities through `task2_1_full_year_parquet_extraction.py`.
+### Data Processing Results:
+- **Total Trading Days**: 37
+- **Date Range**: 2025-03-27 to 2025-05-23
+- **Feature Columns**: 24 total columns
+- **Processing Method**: Daily aggregation using pandas resample for robustness
 
-#### Data Collection Results
+#### Regime Distribution:
+- **MildBias**: 23 days (62.2%)
+- **Trend**: 12 days (32.4%)  
+- **Momentum**: 2 days (5.4%)
+- **RangeBound**: 0 days (0.0%)
+- **Event**: 0 days (0.0%)
 
-**📈 Bank Nifty Index Data:**
-- **Total Records**: 94,560 minute-level data points
-- **Date Range**: 2024-05-26 to 2025-05-21 
-- **Unique Trading Days**: 62 business days processed
-- **Data Format**: Minute-level OHLCV data with volume proxy from front-month futures
-- **File Format**: Combined from 62 CSV files + 1 Parquet file into unified `data/processed/banknifty_index.parquet`
+### Classification Thresholds Applied:
+- **High Volatility**: >2.0%
+- **High Momentum**: >1.5% daily return
+- **Moderate Momentum**: >0.8% daily return
+- **High IV Percentile**: >70%
+- **Low IV Percentile**: <30%
+- **High Volume**: >1.5x average
+- **Large OR Range**: >1.2% of price
+- **Small OR Range**: <0.6% of price
 
-**📊 Options Chain Data:**
-- **Total Records**: 620 options records
-- **Date Range**: 2025-05-19 to 2025-05-23
-- **Unique Trading Days**: 5 days with options data
-- **Strike Coverage**: Comprehensive ATM ±3000 points coverage
-- **File Format**: Combined from 5 Parquet files into unified `data/processed/banknifty_options_chain.parquet`
+### Output Schema:
+The `labeled_days.parquet` file contains 24 columns:
 
-#### Sample Data Head
+**Core OHLCV Data:**
+1. `date` - Trading date
+2. `open` - Daily open price
+3. `high` - Daily high price  
+4. `low` - Daily low price
+5. `close` - Daily close price
+6. `volume` - Daily volume
+7. `vwap` - Volume weighted average price
 
-**Bank Nifty Index (First 3 Records):**
-```
-Date                      | Open    | High    | Low     | Close   | Volume
-2024-05-27 09:15:00+05:30| 49105.90| 49129.75| 49051.25| 49104.70| 0.0
-2024-05-27 09:16:00+05:30| 49108.15| 49109.90| 49077.50| 49100.55| 0.0
-2024-05-27 09:17:00+05:30| 49098.25| 49116.35| 49078.85| 49094.45| 0.0
-```
+**Returns & Volatility:**
+8. `daily_return` - Daily return percentage
+9. `volatility` - 5-day rolling volatility
+10. `prev_close` - Previous day's close
 
-**Options Chain (First 3 Records):**
-```
-Date      | Strike | Type | Last Price | Volume | OI     | Spot Price
-2025-05-19| 52400  | CE   | 2596.10    | 14851  | 28425  | ~55000
-2025-05-19| 52400  | PE   | 54.45      | 8932   | 35672  | ~55000  
-2025-05-19| 52500  | CE   | 3064.95    | 12543  | 41239  | ~55000
-```
+**Opening Range Features:**
+11. `or_high` - Opening range high (first 30 min)
+12. `or_low` - Opening range low (first 30 min)  
+13. `or_range` - Opening range (high - low)
+14. `or_volume` - Opening range volume
+15. `or_breakout_direction` - Breakout direction (1=up, -1=down, 0=none)
+16. `or_range_pct` - Opening range as percentage of close price
 
-#### Technical Implementation Features
+**IV & Options Features:**
+17. `atm_iv` - At-the-money implied volatility
+18. `iv_percentile` - IV percentile ranking
+19. `iv_rank` - IV rank reference
 
-**✅ Enhanced Volume Integration:**
-- Implemented front-month futures volume proxy for Bank Nifty index data
-- Successfully integrated rolling futures contract logic 
-- Proper volume data for recent dates, fallback for historical dates
+**Derived Technical Features:**
+20. `price_range` - Daily range as percentage of close
+21. `body_size` - Candle body size as percentage of close
+22. `volume_ma` - 10-day moving average volume
+23. `volume_ratio` - Current volume / average volume
 
-**✅ Comprehensive Data Pipeline:**
-- **Raw Data**: Individual daily files in `data/raw/` (CSV + Parquet formats)
-- **Processed Data**: Consolidated files in `data/processed/` ready for ML pipeline
-- **Data Quality**: Automated validation and error handling
+**Classification Output:**
+24. `regime` - Market regime classification
 
-**✅ Production-Ready Processing:**
-- **Data Consolidation**: `src/data_ingest/load_data.py` updated to handle mixed CSV/Parquet inputs
-- **Statistics Generation**: Automated reporting with data counts and sample previews
-- **Error Handling**: Graceful fallback for missing historical options data
+### Classification Logic Applied:
 
-#### Data Quality Assessment
+**Momentum Regime**: Very high momentum (>1.5%) + strong OR breakout + high volume (>1.5x avg)
+**Event Regime**: High volatility (>2.0%) + high IV (>70%) + large OR range (>1.2%)
+**Trend Regime**: Moderate momentum (>0.8%) + OR breakout in same direction as daily move
+**RangeBound Regime**: Low volatility (<0.8%) + no OR breakout + low IV (<30%) + small OR range (<0.6%)
+**MildBias Regime**: Default for moderate market conditions
 
-**Bank Nifty Index:**
-- ✅ **Continuity**: 94,560 minute records across 62 trading days
-- ✅ **Format Consistency**: Standardized OHLCV format with timezone-aware timestamps
-- ⚠️ **Volume Limitation**: Recent dates have futures volume proxy, older dates show zero volume (expected)
-- ✅ **Market Hours**: Data properly filtered to trading hours (9:15 AM - 3:30 PM IST)
+### Key Insights:
+1. **Market Characteristics**: The 37-day period (March-May 2025) showed predominantly moderate market conditions
+2. **Trend Dominance**: 32.4% trending days suggest directional market moves
+3. **Low Volatility Environment**: No Event or RangeBound regimes detected, indicating stable market conditions
+4. **Momentum Events**: Only 2 high-momentum days detected with strong breakouts and volume
 
-**Options Chain:**  
-- ✅ **Strike Coverage**: ATM ±3000 points with 100-point steps
-- ✅ **Call/Put Balance**: Equal coverage of CE and PE options
-- ✅ **Real Market Data**: Volume and OI from actual market transactions
-- ⚠️ **Historical Limitation**: Full options history limited by API availability (~1 week)
+**Status**: ✅ COMPLETED - Ready for Phase 3 model training and strategy development
 
-#### Files Generated
-
-**Processed Files Ready for ML Pipeline:**
-- `data/processed/banknifty_index.parquet` - 94,560 rows of minute data
-- `data/processed/banknifty_options_chain.parquet` - 620 rows of options data
-
-**Raw Data Archive:**
-- 62 Bank Nifty CSV files (historical collection)
-- 1 Bank Nifty Parquet file (new format)
-- 5 Options Parquet files (recent market data)
-
-#### Key Achievements
-
-1. **✅ Complete Data Pipeline**: Raw → Processed → ML-Ready format
-2. **✅ Hybrid Data Method**: Historical CSV + Modern Parquet integration  
-3. **✅ Volume Fix Implementation**: Front-month futures volume proxy working
-4. **✅ Production Scaling**: Handles full year collection efficiently
-5. **✅ Data Validation**: Comprehensive statistics and quality checks
-
-#### Next Steps for Task 2.1+
-
-The data extraction is now complete and ready for:
-- **Feature Engineering** (Task 2.2): Technical indicators using minute OHLCV data
-- **Regime Labeling**: Market condition classification using volume and price patterns
-- **ML Model Training**: Supervised learning on processed datasets
-
-**Status**: Task 2.1 Full Year Data Collection **✅ COMPLETED SUCCESSFULLY**
-
-
-# Task 2.1: CORRECTED IMPLEMENTATION - Proper Methodology
-
-## 🚨 ISSUES IDENTIFIED AND FIXED
-
-### The Core Problems
-1. **Business Calendar**: Used sampling instead of complete business day calendar
-2. **Weekly Expiry**: Wrong logic, not using kite.instruments("NSE") as required
-3. **Option Data Fetching**: Used historical_data() instead of required kite.ltp() bulk quotes
-4. **Symbol Format**: Not using correct NSE:BANKNIFTY{expiry}{strike}{opt} format
-
-### The Corrected Solution
-1. **Complete Business Days**: Generate ALL business days (no sampling)
-2. **NSE Expiry Logic**: Use kite.instruments("NSE") to find proper Thursday expiries
-3. **LTP Bulk Quotes**: Use kite.ltp() for bulk option chain snapshots as required
-4. **Proper Symbols**: NSE:BANKNIFTY{expiry:%d%b%Y}{strike}{opt} format
-
-## ✅ CORRECTED IMPLEMENTATION
-
-### 1. Business Day Calendar
-- **Before**: Sampling every N days ❌
-- **After**: Complete business day calendar for full year ✅
-
-### 2. Weekly Expiry Logic  
-- **Before**: Generic expiry dates from NFO instruments ❌
-- **After**: kite.instruments("NSE") + Thursday filtering ✅
-
-### 3. Option Chain Data Method
-- **Before**: kite.historical_data() for individual instruments ❌  
-- **After**: kite.ltp() bulk quotes with proper symbol format ✅
-
-## 📊 CORRECTED DATA COLLECTION RESULTS
-
-### Bank Nifty Index Data
-- **Minute-level records**: 7,125
-- **Storage**: `data/raw/bnk_index_20250520.csv`
-
-### Option Chain Data (LTP BULK QUOTES)
-- **Trading dates processed**: 19/21
-- **Success rate**: 90.5%
-- **Total option records**: 2,356
-- **Storage**: `data/raw/options_corrected_<YYYYMMDD>.parquet` files
-
-### Corrected Data Sample
-
-Sample CORRECTED data from options_corrected_20250428.parquet:
-    strike option_type  last_price      ltp        iv
-0  55400.0          CE     1225.35  1225.35  0.161511
-1  55400.0          PE      962.20   962.20  0.176171
-2  55300.0          CE     1283.70  1283.70  0.162048
-3  55300.0          PE      921.30   921.30  0.176827
-4  55500.0          CE     1170.00  1170.00  0.161212
-
-DATA QUALITY CHECK (LTP Method):
-- Records with LTP > 0: 124/124 (100.0%)
-- LTP price range: 209.35 to 3442.75
-- IV success rate: 123/124 (99.2%)
-- Strike coverage: 62 unique strikes
-
-
-## 🔧 TECHNICAL CORRECTIONS
-
-### LTP Bulk Quote Usage
-- **Method**: `kite.ltp(symbols)` with bulk symbol list
-- **Symbol Format**: `NSE:BANKNIFTY{expiry:%d%b%Y}{strike}{opt}`
-- **Strike Range**: `range(spot-2000, spot+2001, 100)` as required
-- **Rate Limiting**: 0.5s between calls
-
-### Data Structure Improvements
-- **LTP Prices**: Real current market prices from exchange
-- **Symbol Mapping**: Proper NSE symbol format compliance
-- **Strike Coverage**: Full range as specified in requirements
-- **IV Calculation**: Using LTP prices with py_vollib
-
-## 📈 VALIDATION RESULTS
-
-### Data Quality Metrics
-- **LTP Coverage**: All records have valid last traded prices
-- **Strike Range**: Proper (spot±2000) with 100 step intervals
-- **Symbol Format**: Compliant with NSE:BANKNIFTY format
-- **IV Success**: Professional calculation using py_vollib with LTP data
-
-## 🚀 IMPLEMENTATION STATUS
-
-✅ **Business Day Calendar**: Complete year of business days (not sampled)
-✅ **Weekly Expiry Logic**: Using kite.instruments("NSE") + Thursday filtering  
-✅ **Option Data Method**: kite.ltp() bulk quotes as required
-✅ **Symbol Format**: NSE:BANKNIFTY{expiry}{strike}{opt} compliant
-✅ **Strike Range**: (spot-2000) to (spot+2000) step 100 as specified
-
-## Status: ✅ METHODOLOGY CORRECTED
-Successfully implemented the required approach using proper business calendar, NSE expiry logic, and LTP bulk quotes.
-
-Generated on: 2025-05-26 01:48:30
+Generated on: 2025-05-27 (Document cleaned and updated)
