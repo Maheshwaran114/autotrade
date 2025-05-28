@@ -179,7 +179,7 @@ def preprocess_features(features_file: str = None,
     Args:
         features_file: Path to features pickle file (defaults to processed/features.pkl)
         save_scaler: Whether to save the fitted scaler
-        scaler_file: Path to save scaler (defaults to models/feature_scaler.pkl)
+        scaler_file: Path to save scaler (defaults to models/scaler.pkl)
         
     Returns:
         Tuple[pd.DataFrame, StandardScalerPipeline]: Scaled features and fitted pipeline
@@ -188,7 +188,7 @@ def preprocess_features(features_file: str = None,
     if features_file is None:
         features_file = PROCESSED_DIR / "features.pkl"
     if scaler_file is None:
-        scaler_file = MODELS_DIR / "feature_scaler.pkl"
+        scaler_file = MODELS_DIR / "scaler.pkl"
     
     # Load features
     logger.info(f"Loading features from {features_file}")
@@ -222,13 +222,13 @@ def load_preprocessor(scaler_file: str = None) -> StandardScalerPipeline:
     Load a previously saved preprocessing pipeline.
     
     Args:
-        scaler_file: Path to scaler file (defaults to models/feature_scaler.pkl)
+        scaler_file: Path to scaler file (defaults to models/scaler.pkl)
         
     Returns:
         StandardScalerPipeline: Loaded preprocessing pipeline
     """
     if scaler_file is None:
-        scaler_file = MODELS_DIR / "feature_scaler.pkl"
+        scaler_file = MODELS_DIR / "scaler.pkl"
     
     pipeline = StandardScalerPipeline()
     return pipeline.load(scaler_file)
