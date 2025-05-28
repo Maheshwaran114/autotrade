@@ -109,8 +109,8 @@ def compute_daily_metrics(index_data: pd.DataFrame) -> pd.DataFrame:
     daily_df['prev_close'] = daily_df['close'].shift(1)
     daily_df['daily_return'] = (daily_df['close'] - daily_df['prev_close']) / daily_df['prev_close']
     
-    # Calculate 5-day rolling volatility
-    daily_df['volatility'] = daily_df['daily_return'].rolling(window=5, min_periods=1).std()
+    # Calculate 5-day rolling volatility (requires minimum 2 periods for meaningful calculation)
+    daily_df['volatility'] = daily_df['daily_return'].rolling(window=5, min_periods=2).std()
     
     logger.info(f"Computed daily metrics for {len(daily_df)} trading days")
     return daily_df
@@ -185,6 +185,7 @@ def extract_opening_range_features(index_data: pd.DataFrame) -> pd.DataFrame:
 def calculate_iv_percentiles(options_data: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate IV percentiles and ATM IV from options data.
+    Uses expanding window for true historical percentiles.
     
     Args:
         options_data: Options chain data
@@ -199,6 +200,7 @@ def calculate_iv_percentiles(options_data: pd.DataFrame) -> pd.DataFrame:
         options_data['date'] = pd.to_datetime(options_data['date']).dt.date
     
     iv_metrics = []
+    historical_atm_ivs = []  # Store historical ATM IVs for expanding percentile calculation
     
     for date, group in options_data.groupby('date'):
         if len(group) == 0:
@@ -218,12 +220,18 @@ def calculate_iv_percentiles(options_data: pd.DataFrame) -> pd.DataFrame:
         else:
             atm_iv = group['iv'].median()  # Fallback to median IV
         
-        # Calculate IV percentile (current IV vs historical range)
-        all_ivs = group['iv'].values
-        iv_percentile = (atm_iv - all_ivs.min()) / (all_ivs.max() - all_ivs.min()) if all_ivs.max() != all_ivs.min() else 0.5
+        # Add current ATM IV to historical data
+        historical_atm_ivs.append(atm_iv)
         
-        # Calculate IV rank (relative to recent history)
-        # For simplicity, using current day's percentile position
+        # Calculate IV percentile using expanding window (current vs all historical)
+        if len(historical_atm_ivs) == 1:
+            iv_percentile = 0.5  # First day defaults to 50th percentile
+        else:
+            # Calculate percentile of current ATM IV relative to all historical ATM IVs
+            iv_percentile = len([iv for iv in historical_atm_ivs[:-1] if iv <= atm_iv]) / (len(historical_atm_ivs) - 1)
+        
+        # Calculate IV rank (current ATM IV relative to all option IVs for this day)
+        all_ivs = group['iv'].values
         iv_rank = np.percentile(all_ivs, 50)  # Median IV as rank reference
         
         iv_metrics.append({
@@ -263,9 +271,9 @@ def label_regimes(daily_metrics: pd.DataFrame, opening_features: pd.DataFrame,
     # Merge all features
     labeled_data = daily_metrics.copy()
     
-    # Merge opening range features
+    # Ensure consistent date types for merging
+    labeled_data['date'] = pd.to_datetime(labeled_data['date'])
     opening_features['date'] = pd.to_datetime(opening_features['date'])
-    daily_metrics['date'] = pd.to_datetime(daily_metrics['date'])
     iv_metrics['date'] = pd.to_datetime(iv_metrics['date'])
     
     labeled_data = labeled_data.merge(opening_features, on='date', how='left')

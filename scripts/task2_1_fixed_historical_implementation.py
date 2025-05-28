@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 CONFIG = {
-    "DAYS_BACK": 365,  # Full year of trading data  
+    "DAYS_BACK": 60,  # 60 days of reliable trading data based on API availability testing
     "MINUTE_DATA_CHUNK_DAYS": 60,  # API limit for minute data
     "STRIKE_RANGE_OFFSET": 2000,  # (spot - 2000) to (spot + 2000) as required
     "STRIKE_STEP": 100,    # Step by 100 as required
@@ -57,7 +57,7 @@ CONFIG = {
     "PARALLEL_WORKERS": 5,  # Number of parallel workers
     "HISTORICAL_DATA_MAX_RETRIES": 2,  # SPECIAL: Lower retries for historical data calls
     "HISTORICAL_DATA_TIMEOUT": 10,     # SPECIAL: Timeout for historical data calls (seconds)
-    "MIN_DATA_AVAILABILITY_DAYS": 45,  # Minimum days from current date for data availability
+    "MIN_DATA_AVAILABILITY_DAYS": 60,  # Minimum days from current date for data availability
 }
 
 def get_all_business_days(start_date: date, end_date: date) -> List[date]:
@@ -436,9 +436,11 @@ def fetch_option_chain_snapshot_historical(client, expiry_date: date, strike_ran
             logger.warning(f"⚠️  Date {trade_date} is {days_from_current} days old, may not have options data available")
             logger.warning(f"⚠️  Zerodha typically has options data for last {CONFIG['MIN_DATA_AVAILABILITY_DAYS']} days only")
             
-            # For old dates, return empty to avoid long timeouts
-            if days_from_current > 90:  # More than 3 months old
-                logger.error(f"❌ Skipping {trade_date} - too old for options data (>{days_from_current} days)")
+            # For 60-day collection, allow dates within the reliable data window
+            if CONFIG["DAYS_BACK"] <= 60:  # 60-day mode
+                logger.info(f"📅 60-day mode: Attempting to fetch data for {trade_date} ({days_from_current} days old)")
+            elif days_from_current > 65:  # More than 65 days old (beyond reliable window)
+                logger.error(f"❌ Skipping {trade_date} - too old for reliable options data ({days_from_current} days)")
                 return []
         
         # Step 4: Fetch historical data for each option

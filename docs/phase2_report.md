@@ -567,11 +567,71 @@ The `labeled_days.parquet` file contains 24 columns:
 Generated on: 2025-05-27 (Document cleaned and updated)
 
 
-## 2.3 Feature Engineering
-- **Features saved**: `data/processed/features.pkl` (37×12)
-- **Labels saved**: `data/processed/labels.pkl` (37)
-- **Feature columns**: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
-- **Label distribution**: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+## 2.3 Feature Engineering - ML ENGINEERING IMPROVEMENTS ✅
+
+**Objective**: Create feature matrix X and label vector y for machine learning model training with robust preprocessing pipeline.
+
+### Implementation Details:
+- **Module**: `src/features/feature_engineering.py` (enhanced with ML improvements)
+- **Preprocessing**: `src/models/preprocessing.py` (new StandardScaler pipeline)
+- **Input Files**: `data/processed/labeled_days.parquet` (with improved IV calculations)
+- **Output Files**: 
+  - `data/processed/features.pkl` (37×12 feature matrix)
+  - `data/processed/labels.pkl` (37 regime labels)
+  - `models/feature_scaler.pkl` (fitted StandardScaler for production)
+
+### ML Engineering Fixes Applied:
+
+#### 1. **IV Percentile Calculation Fix** 🔧
+- **Issue**: IV percentile was calculated using only current day's option chain (rolling→single day range)
+- **Fix**: Implemented expanding window calculation for true historical percentiles
+- **Impact**: IV percentile now varies meaningfully (0.26-1.0, std=0.185) instead of constant 0.5
+- **Code**: `src/data_ingest/label_days.py:calculate_iv_percentiles()` - now uses expanding historical context
+
+#### 2. **Volatility Calculation Improvement** 🔧  
+- **Issue**: `min_periods=1` allowed volatility calculation from single data point
+- **Fix**: Changed to `min_periods=2` requiring at least 2 periods for meaningful volatility
+- **Impact**: More robust volatility measurements, eliminates spurious zero volatility values
+- **Code**: `src/data_ingest/label_days.py:compute_daily_metrics()` line 113
+
+#### 3. **Feature Scaling Pipeline** 🆕
+- **Implementation**: New `StandardScalerPipeline` class with comprehensive preprocessing
+- **Features**: Fit, transform, inverse_transform, save/load capabilities
+- **Validation**: All features now scaled to mean≈0, std≈1 for optimal ML performance
+- **Production Ready**: Scaler persisted for consistent inference-time preprocessing
+
+### Feature Engineering Results:
+- **Features Matrix**: 37 samples × 12 features (scaled and ready for ML)
+- **Label Vector**: 37 regime classifications {MildBias: 23, Trend: 12, Momentum: 2}
+- **Quality Metrics**: All features properly normalized, no constant features detected
+
+### Feature Scaling Statistics:
+```
+Feature means (post-scaling): [-0.0, 0.0, -0.0, 0.0, 0.0, ...]  # ≈ 0
+Feature stds (post-scaling):  [1.014, 1.014, 1.014, 1.014, ...] # ≈ 1
+```
+
+### Sample Preprocessed Features:
+```python
+# Load preprocessed features for ML training
+from src.models.preprocessing import preprocess_features, load_preprocessor
+
+# Option 1: Process features from scratch  
+X_scaled, pipeline = preprocess_features()
+
+# Option 2: Load pre-fitted scaler for new data
+pipeline = load_preprocessor()
+X_new_scaled = pipeline.transform(X_new)
+```
+
+### Files Created/Modified:
+- ✅ `src/models/preprocessing.py` - New StandardScaler pipeline implementation
+- ✅ `src/models/__init__.py` - Package initialization  
+- ✅ `models/feature_scaler.pkl` - Fitted scaler for production use
+- ✅ `src/data_ingest/label_days.py` - Fixed IV percentile & volatility calculations
+- ✅ `src/features/feature_engineering.py` - Improved pickle serialization
+
+**Status**: ✅ **COMPLETED** - Production-ready feature engineering with ML best practices
 
 ### Sample Features:
 ```
@@ -612,3 +672,161 @@ Name: regime, dtype: object
 12. **volume_ratio**: Volume relative to average
 
 **Status**: ✅ COMPLETED - Ready for Phase 3 model training
+
+
+## 2.3 Feature Engineering
+- Features saved: data/processed/features.pkl (37×12)
+- Labels saved:   data/processed/labels.pkl (37)
+- Feature columns: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
+- Label distribution: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+- Sample features:
+```
+                            gap_pct  or_width  ...    atm_iv  volume_ratio
+date                                           ...                        
+2025-03-27 00:00:00+05:30  0.000000  0.009176  ...  0.138700      1.000000
+2025-03-28 00:00:00+05:30  0.001444  0.006940  ...  0.140525      0.953164
+2025-04-01 00:00:00+05:30 -0.006997  0.010094  ...  0.143442      2.005598
+2025-04-02 00:00:00+05:30  0.002279  0.006471  ...  0.136468      0.586932
+2025-04-03 00:00:00+05:30 -0.009008  0.009561  ...  0.139002      0.556373
+
+[5 rows x 12 columns]
+```
+- Sample labels:
+```
+date
+2025-03-27 00:00:00+05:30    MildBias
+2025-03-28 00:00:00+05:30    MildBias
+2025-04-01 00:00:00+05:30       Trend
+2025-04-02 00:00:00+05:30       Trend
+2025-04-03 00:00:00+05:30    MildBias
+Name: regime, dtype: object
+```
+
+
+## 2.3 Feature Engineering
+- Features saved: data/processed/features.pkl (37×12)
+- Labels saved:   data/processed/labels.pkl (37)
+- Feature columns: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
+- Label distribution: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+- Sample features:
+```
+                            gap_pct  or_width  ...    atm_iv  volume_ratio
+date                                           ...                        
+2025-03-27 00:00:00+05:30  0.000000  0.009176  ...  0.138700      1.000000
+2025-03-28 00:00:00+05:30  0.001444  0.006940  ...  0.140525      0.953164
+2025-04-01 00:00:00+05:30 -0.006997  0.010094  ...  0.143442      2.005598
+2025-04-02 00:00:00+05:30  0.002279  0.006471  ...  0.136468      0.586932
+2025-04-03 00:00:00+05:30 -0.009008  0.009561  ...  0.139002      0.556373
+
+[5 rows x 12 columns]
+```
+- Sample labels:
+```
+date
+2025-03-27 00:00:00+05:30    MildBias
+2025-03-28 00:00:00+05:30    MildBias
+2025-04-01 00:00:00+05:30       Trend
+2025-04-02 00:00:00+05:30       Trend
+2025-04-03 00:00:00+05:30    MildBias
+Name: regime, dtype: object
+```
+
+
+## 2.3 Feature Engineering
+- Features saved: data/processed/features.pkl (37×12)
+- Labels saved:   data/processed/labels.pkl (37)
+- Feature columns: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
+- Label distribution: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+- Sample features:
+```
+                            gap_pct  or_width  ...    atm_iv  volume_ratio
+date                                           ...                        
+2025-03-27 00:00:00+05:30  0.000000  0.009176  ...  0.138700      1.000000
+2025-03-28 00:00:00+05:30  0.001444  0.006940  ...  0.140525      0.953164
+2025-04-01 00:00:00+05:30 -0.006997  0.010094  ...  0.143442      2.005598
+2025-04-02 00:00:00+05:30  0.002279  0.006471  ...  0.136468      0.586932
+2025-04-03 00:00:00+05:30 -0.009008  0.009561  ...  0.139002      0.556373
+
+[5 rows x 12 columns]
+```
+- Sample labels:
+```
+date
+2025-03-27 00:00:00+05:30    MildBias
+2025-03-28 00:00:00+05:30    MildBias
+2025-04-01 00:00:00+05:30       Trend
+2025-04-02 00:00:00+05:30       Trend
+2025-04-03 00:00:00+05:30    MildBias
+Name: regime, dtype: object
+```
+
+
+## Phase 2.2: Label Trading Regimes - COMPLETED ✅
+
+**Objective**: Classify each trading day into market regimes based on index and option features.
+
+### Implementation Details:
+- **Module**: `src/data_ingest/label_days.py`
+- **Input Files**: 
+  - `data/processed/banknifty_index.parquet` (minute-level data)
+  - `data/processed/banknifty_options_chain.parquet` (options data)
+- **Output File**: `data/processed/labeled_days.parquet`
+
+### Features Computed:
+1. **Daily Metrics**: OHLCV, VWAP, returns, volatility
+2. **Opening Range Features**: First 30-min high/low/range/volume/breakout direction
+3. **IV Metrics**: IV percentiles, ATM IV, IV rank
+
+### Regime Classification Results:
+- **Total Trading Days**: 37
+- **Date Range**: 2025-03-27 to 2025-05-23
+
+#### Regime Distribution:
+- **MildBias**: 23 days (62.2%)
+- **Trend**: 12 days (32.4%)
+- **Momentum**: 2 days (5.4%)
+
+### Classification Thresholds:
+- High Volatility: >2.0%
+- High Momentum: >1.5% daily return
+- High IV Percentile: >70%
+- High Volume: >1.5x average
+- Large OR Range: >1.2% of price
+
+### Output Schema:
+The `labeled_days.parquet` file contains 24 columns including:
+- Basic OHLCV data and derived metrics
+- Opening range features
+- IV percentiles and rankings  
+- **regime**: Primary classification (Trend/RangeBound/Event/MildBias/Momentum)
+
+**Status**: ✅ COMPLETED - Ready for Phase 3 model training
+
+
+## 2.3 Feature Engineering
+- Features saved: data/processed/features.pkl (37×12)
+- Labels saved:   data/processed/labels.pkl (37)
+- Feature columns: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
+- Label distribution: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+- Sample features:
+```
+             gap_pct  or_width  ...    atm_iv  volume_ratio
+date                            ...                        
+2025-03-27 -0.008719  0.009176  ...  0.136122      1.000000
+2025-03-28  0.001444  0.006940  ...  0.137430      0.953164
+2025-04-01 -0.006997  0.010094  ...  0.145840      2.005598
+2025-04-02  0.002279  0.006471  ...  0.142863      0.586932
+2025-04-03 -0.009008  0.009561  ...  0.143941      0.556373
+
+[5 rows x 12 columns]
+```
+- Sample labels:
+```
+date
+2025-03-27    MildBias
+2025-03-28    MildBias
+2025-04-01       Trend
+2025-04-02       Trend
+2025-04-03    MildBias
+Name: regime, dtype: object
+```

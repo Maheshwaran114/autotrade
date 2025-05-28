@@ -80,9 +80,15 @@ def assemble_labels(df):
 
 def save_data(X, y, feature_path="data/processed/features.pkl", label_path="data/processed/labels.pkl"):
     """Save feature matrix and labels to pickle files."""
+    import pickle
     Path("data/processed").mkdir(parents=True, exist_ok=True)
-    joblib.dump(X, feature_path)
-    joblib.dump(y, label_path)
+    
+    # Use pickle instead of joblib for better compatibility
+    with open(feature_path, 'wb') as f:
+        pickle.dump(X, f, protocol=pickle.HIGHEST_PROTOCOL)
+    
+    with open(label_path, 'wb') as f:
+        pickle.dump(y, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 def main():
     """Main feature engineering pipeline."""
