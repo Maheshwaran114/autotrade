@@ -830,3 +830,216 @@ date
 2025-04-03    MildBias
 Name: regime, dtype: object
 ```
+
+
+## Phase 2.2: Label Trading Regimes - COMPLETED ✅
+
+**Objective**: Classify each trading day into market regimes based on index and option features.
+
+### Implementation Details:
+- **Module**: `src/data_ingest/label_days.py`
+- **Input Files**: 
+  - `data/processed/banknifty_index.parquet` (minute-level data)
+  - `data/processed/banknifty_options_chain.parquet` (options data)
+- **Output File**: `data/processed/labeled_days.parquet`
+
+### Features Computed:
+1. **Daily Metrics**: OHLCV, VWAP, returns, volatility
+2. **Opening Range Features**: First 30-min high/low/range/volume/breakout direction
+3. **IV Metrics**: IV percentiles, ATM IV, IV rank
+
+### Regime Classification Results:
+- **Total Trading Days**: 37
+- **Date Range**: 2025-03-27 to 2025-05-23
+
+#### Regime Distribution:
+- **MildBias**: 23 days (62.2%)
+- **Trend**: 12 days (32.4%)
+- **Momentum**: 2 days (5.4%)
+
+### Classification Thresholds:
+- High Volatility: >2.0%
+- High Momentum: >1.5% daily return
+- High IV Percentile: >70%
+- High Volume: >1.5x average
+- Large OR Range: >1.2% of price
+
+### Output Schema:
+The `labeled_days.parquet` file contains 24 columns including:
+- Basic OHLCV data and derived metrics
+- Opening range features
+- IV percentiles and rankings  
+- **regime**: Primary classification (Trend/RangeBound/Event/MildBias/Momentum)
+
+**Status**: ✅ COMPLETED - Ready for Phase 3 model training
+
+
+## 2.3 Feature Engineering
+- Features saved: data/processed/features.pkl (37×12)
+- Labels saved:   data/processed/labels.pkl (37)
+- Feature columns: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
+- Label distribution: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+- Sample features:
+```
+             gap_pct  or_width  ...    atm_iv  volume_ratio
+date                            ...                        
+2025-03-27 -0.008719  0.009176  ...  0.136122      1.000000
+2025-03-28  0.001444  0.006940  ...  0.137430      0.953164
+2025-04-01 -0.006997  0.010094  ...  0.145840      2.005598
+2025-04-02  0.002279  0.006471  ...  0.142863      0.586932
+2025-04-03 -0.009008  0.009561  ...  0.143941      0.556373
+
+[5 rows x 12 columns]
+```
+- Sample labels:
+```
+date
+2025-03-27    MildBias
+2025-03-28    MildBias
+2025-04-01       Trend
+2025-04-02       Trend
+2025-04-03    MildBias
+Name: regime, dtype: object
+```
+
+
+## Phase 2.2: Label Trading Regimes - COMPLETED ✅
+
+**Objective**: Classify each trading day into market regimes based on index and option features.
+
+### Implementation Details:
+- **Module**: `src/data_ingest/label_days.py`
+- **Input Files**: 
+  - `data/processed/banknifty_index.parquet` (minute-level data)
+  - `data/processed/banknifty_options_chain.parquet` (options data)
+- **Output File**: `data/processed/labeled_days.parquet`
+
+### Features Computed:
+1. **Daily Metrics**: OHLCV, VWAP, returns, volatility
+2. **Opening Range Features**: First 30-min high/low/range/volume/breakout direction
+3. **IV Metrics**: IV percentiles, ATM IV, IV rank
+
+### Regime Classification Results:
+- **Total Trading Days**: 37
+- **Date Range**: 2025-03-27 to 2025-05-23
+
+#### Regime Distribution:
+- **MildBias**: 23 days (62.2%)
+- **Trend**: 12 days (32.4%)
+- **Momentum**: 2 days (5.4%)
+
+### Classification Thresholds:
+- High Volatility: >2.0%
+- High Momentum: >1.5% daily return
+- High IV Percentile: >70%
+- High Volume: >1.5x average
+- Large OR Range: >1.2% of price
+
+### Output Schema:
+The `labeled_days.parquet` file contains 24 columns including:
+- Basic OHLCV data and derived metrics
+- Opening range features
+- IV percentiles and rankings  
+- **regime**: Primary classification (Trend/RangeBound/Event/MildBias/Momentum)
+
+**Status**: ✅ COMPLETED - Ready for Phase 3 model training
+
+
+## 2.3 Feature Engineering
+- Features saved: data/processed/features.pkl (37×12)
+- Labels saved:   data/processed/labels.pkl (37)
+- Feature columns: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
+- Label distribution: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+- Sample features:
+```
+             gap_pct  or_width  ...    atm_iv  volume_ratio
+date                            ...                        
+2025-03-27 -0.008719  0.009176  ...  0.136122      1.000000
+2025-03-28  0.001444  0.006940  ...  0.137430      0.953164
+2025-04-01 -0.006997  0.010094  ...  0.145840      2.005598
+2025-04-02  0.002279  0.006471  ...  0.142863      0.586932
+2025-04-03 -0.009008  0.009561  ...  0.143941      0.556373
+
+[5 rows x 12 columns]
+```
+- Sample labels:
+```
+date
+2025-03-27    MildBias
+2025-03-28    MildBias
+2025-04-01       Trend
+2025-04-02       Trend
+2025-04-03    MildBias
+Name: regime, dtype: object
+```
+
+
+## Phase 2.2: Label Trading Regimes - COMPLETED ✅
+
+**Objective**: Classify each trading day into market regimes based on index and option features.
+
+### Implementation Details:
+- **Module**: `src/data_ingest/label_days.py`
+- **Input Files**: 
+  - `data/processed/banknifty_index.parquet` (minute-level data)
+  - `data/processed/banknifty_options_chain.parquet` (options data)
+- **Output File**: `data/processed/labeled_days.parquet`
+
+### Features Computed:
+1. **Daily Metrics**: OHLCV, VWAP, returns, volatility
+2. **Opening Range Features**: First 30-min high/low/range/volume/breakout direction
+3. **IV Metrics**: IV percentiles, ATM IV, IV rank
+
+### Regime Classification Results:
+- **Total Trading Days**: 37
+- **Date Range**: 2025-03-27 to 2025-05-23
+
+#### Regime Distribution:
+- **MildBias**: 23 days (62.2%)
+- **Trend**: 12 days (32.4%)
+- **Momentum**: 2 days (5.4%)
+
+### Classification Thresholds:
+- High Volatility: >2.0%
+- High Momentum: >1.5% daily return
+- High IV Percentile: >70%
+- High Volume: >1.5x average
+- Large OR Range: >1.2% of price
+
+### Output Schema:
+The `labeled_days.parquet` file contains 24 columns including:
+- Basic OHLCV data and derived metrics
+- Opening range features
+- IV percentiles and rankings  
+- **regime**: Primary classification (Trend/RangeBound/Event/MildBias/Momentum)
+
+**Status**: ✅ COMPLETED - Ready for Phase 3 model training
+
+
+## 2.3 Feature Engineering
+- Features saved: data/processed/features.pkl (37×12)
+- Labels saved:   data/processed/labels.pkl (37)
+- Feature columns: gap_pct, or_width, intraday_volatility, iv_pct, iv_change, sector_strength, daily_return, price_range, body_size, or_breakout_direction, atm_iv, volume_ratio
+- Label distribution: {'MildBias': np.int64(23), 'Trend': np.int64(12), 'Momentum': np.int64(2)}
+- Sample features:
+```
+             gap_pct  or_width  ...    atm_iv  volume_ratio
+date                            ...                        
+2025-03-27 -0.008719  0.009176  ...  0.136122      1.000000
+2025-03-28  0.001444  0.006940  ...  0.137430      0.953164
+2025-04-01 -0.006997  0.010094  ...  0.145840      2.005598
+2025-04-02  0.002279  0.006471  ...  0.142863      0.586932
+2025-04-03 -0.009008  0.009561  ...  0.143941      0.556373
+
+[5 rows x 12 columns]
+```
+- Sample labels:
+```
+date
+2025-03-27    MildBias
+2025-03-28    MildBias
+2025-04-01       Trend
+2025-04-02       Trend
+2025-04-03    MildBias
+Name: regime, dtype: object
+```
